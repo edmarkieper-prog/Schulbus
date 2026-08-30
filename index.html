@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1e3a5f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Schulbus Fahrer</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{
+    --blau:#1e3a5f; --blau-hell:#2c5282; --gelb:#ffc107; --gelb-dunkel:#e6a800;
+    --bg:#f4f6f9; --karte-bg:#ffffff; --text:#1a202c; --text2:#5a6675;
+    --gruen:#2e7d32; --rot:#c62828; --rand:#e2e8f0;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg); color:var(--text); overscroll-behavior:none;
+  }
+  .hidden{display:none !important;}
+
+  /* ---------- Login ---------- */
+  #loginScreen{
+    position:fixed; inset:0; background:var(--blau); color:#fff; z-index:500;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px;
+  }
+  #loginScreen .logo{font-size:64px; margin-bottom:8px;}
+  #loginScreen h1{font-size:26px; margin-bottom:4px;}
+  #loginScreen p{color:#b8c7dc; margin-bottom:24px; text-align:center;}
+  #loginScreen form{width:100%; max-width:340px; display:flex; flex-direction:column; gap:12px;}
+  #loginScreen input{
+    padding:14px; border-radius:10px; border:none; font-size:17px; text-align:center;
+  }
+  #loginScreen button{
+    padding:14px; border-radius:10px; border:none; font-size:17px; font-weight:700;
+    background:var(--gelb); color:#1a202c; cursor:pointer;
+  }
+  #loginError{color:#ffab91; text-align:center; min-height:20px; font-size:14px;}
+
+  /* ---------- Grundgerüst ---------- */
+  #app{display:flex; flex-direction:column; height:100dvh;}
+  header{
+    background:var(--blau); color:#fff; padding:12px 16px calc(12px);
+    padding-top:calc(12px + env(safe-area-inset-top, 0px));
+    display:flex; align-items:center; gap:10px; flex-shrink:0;
+  }
+  header .bus{font-size:22px;}
+  header h1{font-size:18px; font-weight:700; flex:1;}
+  #tripDot{width:12px; height:12px; border-radius:50%; background:#546e7a;}
+  #tripDot.live{background:#ff5252; animation:blink 1.2s infinite;}
+  @keyframes blink{50%{opacity:.3}}
+
+  main{flex:1; overflow:hidden; position:relative;}
+  .view{display:none; height:100%; overflow-y:auto; padding:16px; padding-bottom:24px;}
+  .view.active{display:block;}
+  #view-karte{padding:0;}
+
+  nav{
+    display:flex; background:#fff; border-top:1px solid var(--rand); flex-shrink:0;
+    padding-bottom:var(--safe-b);
+  }
+  nav button{
+    flex:1; background:none; border:none; padding:8px 2px 6px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+    font-size:11px; color:var(--text2); font-family:inherit;
+  }
+  nav button .ic{font-size:22px;}
+  nav button.active{color:var(--blau); font-weight:700;}
+
+  /* ---------- Bausteine ---------- */
+  .card{background:#fff; border:1px solid var(--rand); border-radius:14px; padding:16px; margin-bottom:14px;}
+  .card h2{font-size:15px; color:var(--text2); font-weight:600; margin-bottom:10px; text-transform:uppercase; letter-spacing:.4px;}
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    padding:12px 18px; border-radius:10px; border:none; font-size:16px; font-weight:600;
+    cursor:pointer; font-family:inherit; background:var(--blau); color:#fff;
+  }
+  .btn.gelb{background:var(--gelb); color:#1a202c;}
+  .btn.rot{background:var(--rot);}
+  .btn.hell{background:#e8edf4; color:var(--blau);}
+  .btn.klein{padding:8px 12px; font-size:14px; border-radius:8px;}
+  .btn.voll{width:100%;}
+  .btn:disabled{opacity:.5; cursor:default;}
+
+  /* Fahrt-Ansicht */
+  #uhr{font-size:44px; font-weight:800; text-align:center; letter-spacing:1px;}
+  #datum{text-align:center; color:var(--text2); margin-bottom:4px;}
+  #startBtn{
+    width:100%; padding:22px; font-size:22px; font-weight:800; border-radius:16px; border:none;
+    cursor:pointer; font-family:inherit; margin:10px 0 4px;
+    background:var(--gruen); color:#fff; box-shadow:0 4px 14px rgba(46,125,50,.35);
+  }
+  #startBtn.laeuft{background:var(--rot); box-shadow:0 4px 14px rgba(198,40,40,.35);}
+  #startInfo{text-align:center; color:var(--text2); font-size:14px; min-height:20px;}
+  .statGrid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:10px;}
+  .stat{background:#fff; border:1px solid var(--rand); border-radius:12px; padding:12px 8px; text-align:center;}
+  .stat .w{font-size:22px; font-weight:800;}
+  .stat .l{font-size:12px; color:var(--text2);}
+  select, .feld input, .feld select{
+    width:100%; padding:12px; border-radius:10px; border:1px solid var(--rand);
+    font-size:16px; font-family:inherit; background:#fff; color:var(--text);
+  }
+  .feld{margin-bottom:12px;}
+  .feld label{display:block; font-size:13px; color:var(--text2); margin-bottom:5px; font-weight:600;}
+
+  /* Karte */
+  #map{position:absolute; inset:0;}
+  #mapHint{
+    position:absolute; top:12px; left:12px; right:12px; z-index:1000;
+    background:var(--blau); color:#fff; padding:12px; border-radius:10px; text-align:center;
+    font-weight:600; box-shadow:0 4px 12px rgba(0,0,0,.25);
+  }
+  #locBtn{
+    position:absolute; bottom:20px; right:14px; z-index:1000;
+    width:52px; height:52px; border-radius:50%; border:none; background:#fff; font-size:24px;
+    box-shadow:0 3px 10px rgba(0,0,0,.25); cursor:pointer;
+  }
+
+  /* Listen */
+  .zeile{
+    background:#fff; border:1px solid var(--rand); border-radius:12px;
+    padding:12px 14px; margin-bottom:10px;
+  }
+  .zeile .kopf{display:flex; align-items:center; gap:10px;}
+  .zeile .kopf .titel{flex:1; font-weight:700;}
+  .zeile .sub{color:var(--text2); font-size:14px; margin-top:2px;}
+  .stopZeile{display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid var(--rand);}
+  .stopZeile:first-of-type{margin-top:8px;}
+  .stopZeile input[type=checkbox]{width:22px; height:22px; accent-color:var(--gruen); flex-shrink:0;}
+  .stopZeile .sname{flex:1; font-size:15px;}
+  .stopZeile .sname.done{text-decoration:line-through; color:var(--text2);}
+  .leer{color:var(--text2); text-align:center; padding:24px 12px; font-size:15px;}
+  .ereignis{font-size:14px; padding:6px 0; border-top:1px solid var(--rand); color:var(--text2);}
+  .ereignis b{color:var(--text);}
+
+  /* Banner (Geofence-Meldung) */
+  #banner{
+    position:fixed; top:16px; left:16px; right:16px; z-index:2000;
+    background:var(--gelb); color:#1a202c; padding:14px 16px; border-radius:12px;
+    font-weight:700; box-shadow:0 6px 20px rgba(0,0,0,.3); text-align:center;
+    transform:translateY(-120px); transition:transform .3s;
+  }
+  #banner.zeig{transform:translateY(0);}
+
+  /* Modal */
+  #modalWrap{
+    position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:1500;
+    display:flex; align-items:flex-end; justify-content:center;
+  }
+  @media(min-width:600px){ #modalWrap{align-items:center;} }
+  #modal{
+    background:#fff; border-radius:18px 18px 0 0; width:100%; max-width:560px;
+    max-height:85dvh; overflow-y:auto; padding:20px; padding-bottom:calc(20px + var(--safe-b));
+  }
+  @media(min-width:600px){ #modal{border-radius:18px;} }
+  #modal h3{margin-bottom:14px; font-size:18px;}
+  #modal .knoepfe{display:flex; gap:10px; margin-top:16px;}
+  #modal .knoepfe .btn{flex:1;}
+  .suchErg{padding:10px; border:1px solid var(--rand); border-radius:8px; margin-top:8px; font-size:14px; cursor:pointer;}
+  .suchErg:hover{background:var(--bg);}
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="loginScreen">
+  <div class="logo">🚌</div>
+  <h1>Schulbus Fahrer</h1>
+  <p id="loginText">Anmelden</p>
+  <form id="loginForm">
+    <input type="text" id="loginName" placeholder="Dein Name" autocomplete="name">
+    <input type="password" id="loginPin" placeholder="PIN (4-stellig)" inputmode="numeric" maxlength="8">
+    <input type="password" id="loginPin2" placeholder="PIN wiederholen" inputmode="numeric" maxlength="8" class="hidden">
+    <button type="submit" id="loginBtn">Anmelden</button>
+    <div id="loginError"></div>
+  </form>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="hidden">
+  <header>
+    <span class="bus">🚌</span>
+    <h1>Schulbus Fahrer</h1>
+    <div id="tripDot" title="Fahrtstatus"></div>
+  </header>
+
+  <main>
+    <!-- FAHRT -->
+    <section class="view active" id="view-fahrt">
+      <div id="datum"></div>
+      <div id="uhr">--:--</div>
+      <div class="card" style="margin-top:14px;">
+        <div class="feld">
+          <label>Auftrag / Tour für diese Fahrt</label>
+          <select id="tourWahl"><option value="">Ohne Tour</option></select>
+        </div>
+        <button id="startBtn">▶ &nbsp;Fahrt starten</button>
+        <div id="startInfo"></div>
+      </div>
+      <div class="statGrid">
+        <div class="stat"><div class="w" id="stDauer">–</div><div class="l">Dauer</div></div>
+        <div class="stat"><div class="w" id="stKm">–</div><div class="l">km</div></div>
+        <div class="stat"><div class="w" id="stTempo">–</div><div class="l">km/h</div></div>
+      </div>
+      <div class="card" id="liveEventsCard" style="margin-top:14px;">
+        <h2>Ereignisse dieser Fahrt</h2>
+        <div id="liveEvents"><div class="leer">Noch keine Ereignisse.</div></div>
+      </div>
+    </section>
+
+    <!-- KARTE -->
+    <section class="view" id="view-karte">
+      <div id="map"></div>
+      <div id="mapHint" class="hidden"></div>
+      <button id="locBtn" title="Mein Standort">📍</button>
+    </section>
+
+    <!-- AUFTRÄGE -->
+    <section class="view" id="view-auftraege">
+      <button class="btn gelb voll" id="neueTourBtn" style="margin-bottom:14px;">＋ Neue Tour anlegen</button>
+      <div id="tourListe"></div>
+    </section>
+
+    <!-- FAHRTENBUCH -->
+    <section class="view" id="view-fahrtenbuch">
+      <div class="card">
+        <h2>Übersicht</h2>
+        <div id="fbSumme" style="font-size:15px;"></div>
+        <button class="btn hell klein" id="csvBtn" style="margin-top:10px;">⬇ Als CSV exportieren</button>
+      </div>
+      <div id="tripListe"></div>
+    </section>
+
+    <!-- MEHR -->
+    <section class="view" id="view-mehr">
+      <div class="card">
+        <h2>Geofencing-Zonen</h2>
+        <p style="font-size:14px; color:var(--text2); margin-bottom:10px;">
+          Beim Ein- und Ausfahren einer Zone (z.&nbsp;B. Schule, Depot) wird die Zeit automatisch im Fahrtenbuch vermerkt und du bekommst eine Meldung.
+        </p>
+        <button class="btn gelb klein" id="neueZoneBtn">＋ Neue Zone</button>
+        <div id="zonenListe" style="margin-top:10px;"></div>
+      </div>
+      <div class="card">
+        <h2>Benachrichtigungen</h2>
+        <button class="btn hell klein" id="notifBtn">🔔 Meldungen erlauben</button>
+      </div>
+      <div class="card">
+        <h2>Konto</h2>
+        <div id="profilInfo" style="margin-bottom:10px;"></div>
+        <button class="btn hell klein" id="logoutBtn">Abmelden</button>
+        <button class="btn rot klein" id="resetBtn" style="margin-left:8px;">Alle Daten löschen</button>
+      </div>
+      <div class="card">
+        <h2>Info</h2>
+        <p style="font-size:14px; color:var(--text2);">
+          Alle Daten werden nur auf diesem Gerät gespeichert. Version 1.0 (Prototyp).
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <nav>
+    <button data-view="fahrt" class="active"><span class="ic">🚌</span>Fahrt</button>
+    <button data-view="karte"><span class="ic">🗺️</span>Karte</button>
+    <button data-view="auftraege"><span class="ic">📋</span>Aufträge</button>
+    <button data-view="fahrtenbuch"><span class="ic">📖</span>Fahrtenbuch</button>
+    <button data-view="mehr"><span class="ic">⚙️</span>Mehr</button>
+  </nav>
+</div>
+
+<div id="banner"></div>
+<div id="modalWrap" class="hidden"><div id="modal"></div></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+/* ================= Speicher ================= */
+const store = {
+  get(k, d){ try{ const v = JSON.parse(localStorage.getItem(k)); return v === null || v === undefined ? d : v; }catch(e){ return d; } },
+  set(k, v){ localStorage.setItem(k, JSON.stringify(v)); },
+  del(k){ localStorage.removeItem(k); }
+};
+let profil  = store.get("sf_profil", null);
+let trips   = store.get("sf_trips", []);
+let touren  = store.get("sf_touren", []);
+let zonen   = store.get("sf_zonen", []);
+let aktiveFahrt = store.get("sf_aktiv", null);
+
+const $ = id => document.getElementById(id);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const fmtZeit = t => new Date(t).toLocaleTimeString("de-DE", {hour:"2-digit", minute:"2-digit"});
+const fmtDatum = t => new Date(t).toLocaleDateString("de-DE", {weekday:"short", day:"2-digit", month:"2-digit", year:"numeric"});
+function fmtDauer(ms){
+  const s = Math.floor(ms/1000), h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+  return (h>0 ? h+" h " : "") + m + " min";
+}
+function haversine(a, b){ // Meter zwischen [lat,lng]-Punkten
+  const R = 6371000, rad = x => x*Math.PI/180;
+  const dLat = rad(b[0]-a[0]), dLng = rad(b[1]-a[1]);
+  const q = Math.sin(dLat/2)**2 + Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(q));
+}
+async function hashPin(pin){
+  if (crypto.subtle){
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("sf|"+pin));
+    return [...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,"0")).join("");
+  }
+  let h = 5381; for (const c of "sf|"+pin) h = ((h*33) ^ c.charCodeAt(0)) >>> 0;
+  return "x"+h.toString(16);
+}
+
+/* ================= Login ================= */
+const neuRegistrieren = !profil;
+if (neuRegistrieren){
+  $("loginText").textContent = "Willkommen! Lege deinen Namen und eine PIN fest.";
+  $("loginPin2").classList.remove("hidden");
+  $("loginBtn").textContent = "Konto anlegen";
+} else {
+  $("loginName").value = profil.name;
+}
+$("loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = $("loginName").value.trim(), pin = $("loginPin").value.trim();
+  if (!name || pin.length < 4){ $("loginError").textContent = "Bitte Name und mindestens 4-stellige PIN eingeben."; return; }
+  if (!profil){
+    if (pin !== $("loginPin2").value.trim()){ $("loginError").textContent = "Die PINs stimmen nicht überein."; return; }
+    profil = { name, pinHash: await hashPin(pin), seit: Date.now() };
+    store.set("sf_profil", profil);
+    appStart();
+  } else {
+    if (await hashPin(pin) === profil.pinHash){ appStart(); }
+    else { $("loginError").textContent = "Falsche PIN."; }
+  }
+});
+
+/* ================= Ansichten ================= */
+let aktuelleAnsicht = "fahrt";
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => zeige(b.dataset.view)));
+function zeige(v){
+  aktuelleAnsicht = v;
+  document.querySelectorAll(".view").forEach(x => x.classList.toggle("active", x.id === "view-"+v));
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x.dataset.view === v));
+  if (v === "karte" && map) setTimeout(() => map.invalidateSize(), 60);
+}
+
+/* ================= Karte ================= */
+let map, ebeneStops, ebeneZonen, ebenePfad, liveMarker;
+let pickModus = null; // {typ:'stop'|'zone', weiter:fn}
+function karteInit(){
+  map = L.map("map").setView([51.163, 10.447], 6);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "© OpenStreetMap"
+  }).addTo(map);
+  ebeneZonen = L.layerGroup().addTo(map);
+  ebeneStops = L.layerGroup().addTo(map);
+  ebenePfad  = L.layerGroup().addTo(map);
+  map.on("click", e => {
+    if (!pickModus) return;
+    const m = pickModus; pickModus = null;
+    $("mapHint").classList.add("hidden");
+    m.weiter([e.latlng.lat, e.latlng.lng]);
+  });
+  zeichneZonen(); zeichneStops();
+}
+$("locBtn").addEventListener("click", () => {
+  navigator.geolocation.getCurrentPosition(
+    p => { const ll = [p.coords.latitude, p.coords.longitude]; setzeLiveMarker(ll); map.setView(ll, 16); },
+    () => banner("Standort nicht verfügbar. GPS erlauben?"),
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+});
+function setzeLiveMarker(ll){
+  if (!liveMarker){
+    liveMarker = L.circleMarker(ll, { radius: 9, color: "#fff", weight: 3, fillColor: "#1976d2", fillOpacity: 1 }).addTo(map);
+  } else liveMarker.setLatLng(ll);
+}
+function kartePunktWaehlen(hinweis, weiter){
+  pickModus = { weiter };
+  zeige("karte");
+  $("mapHint").textContent = hinweis;
+  $("mapHint").classList.remove("hidden");
+}
+function zeichneZonen(){
+  ebeneZonen.clearLayers();
+  zonen.forEach(z => {
+    L.circle([z.lat, z.lng], { radius: z.radius, color: "#e6a800", fillColor: "#ffc107", fillOpacity: .18 })
+      .bindPopup("🚧 Zone: <b>"+z.name+"</b><br>Radius "+z.radius+" m").addTo(ebeneZonen);
+  });
+}
+function zeichneStops(){
+  ebeneStops.clearLayers();
+  const tour = touren.find(t => t.id === $("tourWahl").value);
+  if (!tour) return;
+  tour.stops.forEach((s, i) => {
+    L.marker([s.lat, s.lng], { icon: L.divIcon({ className: "", html:
+      "<div style='background:#1e3a5f;color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)'>"+(i+1)+"</div>",
+      iconSize: [26,26], iconAnchor: [13,13] }) })
+      .bindPopup("🚏 <b>"+s.name+"</b>").addTo(ebeneStops);
+  });
+}
+function zeigePfad(punkte){
+  ebenePfad.clearLayers();
+  if (!punkte || punkte.length < 2) return;
+  const ll = punkte.map(p => [p[0], p[1]]);
+  const linie = L.polyline(ll, { color: "#c62828", weight: 4 }).addTo(ebenePfad);
+  map.invalidateSize(); // Karte war evtl. gerade noch ausgeblendet
+  map.fitBounds(linie.getBounds(), { padding: [30, 30] });
+}
+
+/* ================= Fahrt / GPS ================= */
+let watchId = null, uhrTimer = null, wakeLock = null, zonenStatus = {};
+
+function uhrTick(){
+  const jetzt = new Date();
+  $("uhr").textContent = jetzt.toLocaleTimeString("de-DE", {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+  $("datum").textContent = fmtDatum(jetzt);
+  if (aktiveFahrt) $("stDauer").textContent = fmtDauer(Date.now() - aktiveFahrt.start);
+}
+
+$("startBtn").addEventListener("click", () => { aktiveFahrt ? fahrtBeenden() : fahrtStarten(); });
+
+function fahrtStarten(){
+  if (!navigator.geolocation){ banner("Dieses Gerät unterstützt kein GPS."); return; }
+  const tour = touren.find(t => t.id === $("tourWahl").value);
+  aktiveFahrt = {
+    id: uid(), start: Date.now(), tourId: tour ? tour.id : "", tourName: tour ? tour.name : "",
+    punkte: [], km: 0, ereignisse: []
+  };
+  zonenStatus = {}; zonen.forEach(z => zonenStatus[z.id] = false);
+  store.set("sf_aktiv", aktiveFahrt);
+  gpsStarten();
+  wakeLockAnfordern();
+  fahrtUiAktualisieren();
+  banner("Fahrt gestartet um " + fmtZeit(aktiveFahrt.start) + " ✅");
+}
+
+function fahrtBeenden(){
+  if (!confirm("Fahrt wirklich beenden?")) return;
+  gpsStoppen();
+  aktiveFahrt.ende = Date.now();
+  aktiveFahrt.km = Math.round(aktiveFahrt.km * 100) / 100;
+  trips.unshift(aktiveFahrt);
+  store.set("sf_trips", trips);
+  const f = aktiveFahrt;
+  aktiveFahrt = null; store.del("sf_aktiv");
+  if (wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; }
+  fahrtUiAktualisieren(); zeichneFahrtenbuch();
+  banner("Fahrt beendet: " + fmtDauer(f.ende - f.start) + ", " + f.km.toFixed(1) + " km 📖");
+}
+
+function gpsStarten(){
+  watchId = navigator.geolocation.watchPosition(gpsPunkt, err => {
+    $("startInfo").textContent = "⚠️ GPS-Fehler: " + err.message;
+  }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+}
+function gpsStoppen(){
+  if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+}
+function gpsPunkt(pos){
+  if (!aktiveFahrt) return;
+  const { latitude: lat, longitude: lng, accuracy: acc, speed } = pos.coords;
+  if (acc > 80) return; // sehr ungenaue Punkte verwerfen
+  const p = [lat, lng, Date.now()];
+  const letzte = aktiveFahrt.punkte[aktiveFahrt.punkte.length - 1];
+  if (letzte){
+    const d = haversine(letzte, p);
+    const dt = (p[2] - letzte[2]) / 1000;
+    if (d < 4 && dt < 10) return;           // Stillstand nicht aufzeichnen
+    if (dt > 0 && d / dt < 70) aktiveFahrt.km += d / 1000; // >250 km/h = GPS-Sprung, ignorieren
+  }
+  aktiveFahrt.punkte.push(p);
+  store.set("sf_aktiv", aktiveFahrt);
+  setzeLiveMarker([lat, lng]);
+  if (aktuelleAnsicht === "karte" && !pickModus) map.panTo([lat, lng]);
+  $("stKm").textContent = aktiveFahrt.km.toFixed(1);
+  $("stTempo").textContent = speed != null ? Math.round(speed * 3.6) : "–";
+  zonenPruefen(lat, lng);
+}
+
+function zonenPruefen(lat, lng){
+  zonen.forEach(z => {
+    const drin = haversine([lat, lng], [z.lat, z.lng]) < z.radius;
+    if (drin !== zonenStatus[z.id]){
+      zonenStatus[z.id] = drin;
+      const e = { t: Date.now(), zone: z.name, typ: drin ? "Einfahrt" : "Ausfahrt" };
+      aktiveFahrt.ereignisse.push(e);
+      store.set("sf_aktiv", aktiveFahrt);
+      melden((drin ? "🟢 Einfahrt: " : "🔴 Ausfahrt: ") + z.name + " (" + fmtZeit(e.t) + ")");
+      zeichneLiveEreignisse();
+    }
+  });
+}
+
+async function wakeLockAnfordern(){
+  try{ if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); }catch(e){}
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && aktiveFahrt && !wakeLock) wakeLockAnfordern();
+});
+
+function fahrtUiAktualisieren(){
+  const laeuft = !!aktiveFahrt;
+  $("startBtn").textContent = laeuft ? "⏹  Fahrt beenden" : "▶  Fahrt starten";
+  $("startBtn").classList.toggle("laeuft", laeuft);
+  $("tripDot").classList.toggle("live", laeuft);
+  $("tourWahl").disabled = laeuft;
+  $("startInfo").textContent = laeuft
+    ? "Fahrt läuft seit " + fmtZeit(aktiveFahrt.start) + (aktiveFahrt.tourName ? " · Tour: " + aktiveFahrt.tourName : "")
+    : "";
+  if (!laeuft){ $("stDauer").textContent = "–"; $("stKm").textContent = "–"; $("stTempo").textContent = "–"; }
+  zeichneLiveEreignisse();
+}
+function zeichneLiveEreignisse(){
+  const ziel = $("liveEvents");
+  if (!aktiveFahrt || aktiveFahrt.ereignisse.length === 0){
+    ziel.innerHTML = "<div class='leer'>Noch keine Ereignisse.</div>"; return;
+  }
+  ziel.innerHTML = aktiveFahrt.ereignisse.map(e =>
+    "<div class='ereignis'><b>" + fmtZeit(e.t) + "</b> – " + e.typ + " " + e.zone + "</div>").join("");
+}
+
+/* ================= Meldungen ================= */
+let bannerTimer = null;
+function banner(text){
+  const b = $("banner");
+  b.textContent = text; b.classList.add("zeig");
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => b.classList.remove("zeig"), 4500);
+}
+function melden(text){
+  banner(text);
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  if ("Notification" in window && Notification.permission === "granted"){
+    try{ new Notification("Schulbus Fahrer", { body: text, icon: "icon-192.png" }); }catch(e){}
+  }
+}
+$("notifBtn").addEventListener("click", async () => {
+  if (!("Notification" in window)){ banner("Dieses Gerät unterstützt keine Benachrichtigungen."); return; }
+  const erg = await Notification.requestPermission();
+  banner(erg === "granted" ? "Benachrichtigungen sind aktiv ✅" : "Benachrichtigungen wurden nicht erlaubt.");
+});
+
+/* ================= Modal ================= */
+function modal(html){
+  $("modal").innerHTML = html;
+  $("modalWrap").classList.remove("hidden");
+}
+function modalZu(){ $("modalWrap").classList.add("hidden"); }
+$("modalWrap").addEventListener("click", e => { if (e.target === $("modalWrap")) modalZu(); });
+
+/* Ort wählen: gemeinsamer Dialog für Stops und Zonen.
+   weiter([lat,lng]) wird aufgerufen, sobald eine Position feststeht. */
+function ortWaehlen(titel, weiter){
+  modal(
+    "<h3>" + titel + "</h3>" +
+    "<button class='btn voll' id='owGps' style='margin-bottom:10px;'>📍 Aktuellen Standort verwenden</button>" +
+    "<button class='btn voll hell' id='owKarte' style='margin-bottom:14px;'>🗺️ Auf der Karte antippen</button>" +
+    "<div class='feld'><label>Oder Adresse suchen</label>" +
+    "<div style='display:flex; gap:8px;'><input id='owSuche' placeholder='z. B. Schulstraße 1, Berlin' style='flex:1; padding:12px; border:1px solid var(--rand); border-radius:10px; font-size:16px;'>" +
+    "<button class='btn klein' id='owSuchBtn'>🔍</button></div><div id='owErg'></div></div>" +
+    "<div class='knoepfe'><button class='btn hell' id='owAbbruch'>Abbrechen</button></div>"
+  );
+  $("owAbbruch").onclick = modalZu;
+  $("owGps").onclick = () => {
+    modalZu();
+    navigator.geolocation.getCurrentPosition(
+      p => weiter([p.coords.latitude, p.coords.longitude]),
+      () => banner("Standort nicht verfügbar."),
+      { enableHighAccuracy: true, timeout: 10000 });
+  };
+  $("owKarte").onclick = () => { modalZu(); kartePunktWaehlen("👆 Tippe auf die Karte, um die Position festzulegen", weiter); };
+  $("owSuchBtn").onclick = async () => {
+    const q = $("owSuche").value.trim();
+    if (!q) return;
+    $("owErg").innerHTML = "<div class='leer'>Suche läuft…</div>";
+    try{
+      const r = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=5&q=" + encodeURIComponent(q));
+      const dat = await r.json();
+      if (dat.length === 0){ $("owErg").innerHTML = "<div class='leer'>Nichts gefunden.</div>"; return; }
+      $("owErg").innerHTML = dat.map((d, i) => "<div class='suchErg' data-i='" + i + "'>" + d.display_name + "</div>").join("");
+      $("owErg").querySelectorAll(".suchErg").forEach(el => el.onclick = () => {
+        const d = dat[+el.dataset.i]; modalZu(); weiter([+d.lat, +d.lon]);
+      });
+    }catch(e){ $("owErg").innerHTML = "<div class='leer'>Suche fehlgeschlagen (Internet?).</div>"; }
+  };
+}
+
+/* ================= Aufträge / Touren ================= */
+function speichereTouren(){ store.set("sf_touren", touren); zeichneTouren(); fuelleTourWahl(); zeichneStops(); }
+
+$("neueTourBtn").addEventListener("click", () => {
+  const name = prompt("Name der Tour (z. B. 'Morgentour Grundschule'):");
+  if (!name || !name.trim()) return;
+  touren.push({ id: uid(), name: name.trim(), stops: [] });
+  speichereTouren();
+});
+
+function zeichneTouren(){
+  const ziel = $("tourListe");
+  if (touren.length === 0){ ziel.innerHTML = "<div class='leer'>Noch keine Touren.<br>Lege oben deine erste Tour mit Haltestellen an.</div>"; return; }
+  ziel.innerHTML = "";
+  touren.forEach(t => {
+    const div = document.createElement("div");
+    div.className = "zeile";
+    const fertig = t.stops.filter(s => s.done).length;
+    div.innerHTML =
+      "<div class='kopf'><span style='font-size:20px;'>📋</span><div style='flex:1;'>" +
+      "<div class='titel'>" + t.name + "</div>" +
+      "<div class='sub'>" + t.stops.length + " Haltestellen · " + fertig + " erledigt</div></div>" +
+      "<button class='btn hell klein' data-a='stop'>＋ Halt</button>" +
+      "<button class='btn rot klein' data-a='del'>🗑</button></div>" +
+      "<div class='stops'></div>" +
+      (t.stops.some(s => s.done) ? "<button class='btn hell klein' data-a='reset' style='margin-top:10px;'>↺ Häkchen zurücksetzen</button>" : "");
+    const stopsDiv = div.querySelector(".stops");
+    t.stops.forEach(s => {
+      const z = document.createElement("div");
+      z.className = "stopZeile";
+      z.innerHTML =
+        "<input type='checkbox' " + (s.done ? "checked" : "") + ">" +
+        "<span class='sname " + (s.done ? "done" : "") + "'>🚏 " + s.name + "</span>" +
+        "<button class='btn klein' title='Navigation starten'>🧭 Navi</button>" +
+        "<button class='btn hell klein' title='Halt löschen'>🗑</button>";
+      z.querySelector("input").onchange = ev => { s.done = ev.target.checked; speichereTouren(); };
+      z.querySelector("button[title='Navigation starten']").onclick = () =>
+        window.open("https://www.google.com/maps/dir/?api=1&destination=" + s.lat + "," + s.lng + "&travelmode=driving", "_blank");
+      z.querySelector("button[title='Halt löschen']").onclick = () => {
+        if (!confirm("Haltestelle '" + s.name + "' löschen?")) return;
+        t.stops = t.stops.filter(x => x.id !== s.id); speichereTouren();
+      };
+      stopsDiv.appendChild(z);
+    });
+    div.querySelector("[data-a='stop']").onclick = () => {
+      const name = prompt("Name der Haltestelle (z. B. 'Hauptstraße / Kirche'):");
+      if (!name || !name.trim()) return;
+      ortWaehlen("Wo liegt „" + name.trim() + "“?", ll => {
+        t.stops.push({ id: uid(), name: name.trim(), lat: ll[0], lng: ll[1], done: false });
+        speichereTouren();
+        banner("Haltestelle gespeichert ✅");
+        zeige("auftraege");
+      });
+    };
+    div.querySelector("[data-a='del']").onclick = () => {
+      if (!confirm("Tour '" + t.name + "' komplett löschen?")) return;
+      touren = touren.filter(x => x.id !== t.id); speichereTouren();
+    };
+    const resetBtn = div.querySelector("[data-a='reset']");
+    if (resetBtn) resetBtn.onclick = () => { t.stops.forEach(s => s.done = false); speichereTouren(); };
+    ziel.appendChild(div);
+  });
+}
+function fuelleTourWahl(){
+  const sel = $("tourWahl"), alt = sel.value;
+  sel.innerHTML = "<option value=''>Ohne Tour</option>" +
+    touren.map(t => "<option value='" + t.id + "'>" + t.name + "</option>").join("");
+  sel.value = touren.some(t => t.id === alt) ? alt : "";
+}
+$("tourWahl").addEventListener("change", zeichneStops);
+
+/* ================= Zonen ================= */
+function speichereZonen(){ store.set("sf_zonen", zonen); zeichneZonenListe(); zeichneZonen(); }
+
+$("neueZoneBtn").addEventListener("click", () => {
+  const name = prompt("Name der Zone (z. B. 'Schule', 'Depot'):");
+  if (!name || !name.trim()) return;
+  let radius = parseInt(prompt("Radius in Metern (z. B. 200):", "200"), 10);
+  if (!radius || radius < 20) radius = 200;
+  ortWaehlen("Wo liegt die Zone „" + name.trim() + "“?", ll => {
+    zonen.push({ id: uid(), name: name.trim(), radius, lat: ll[0], lng: ll[1] });
+    if (aktiveFahrt) zonenStatus[zonen[zonen.length-1].id] = false;
+    speichereZonen();
+    banner("Zone gespeichert ✅");
+    zeige("mehr");
+  });
+});
+function zeichneZonenListe(){
+  const ziel = $("zonenListe");
+  if (zonen.length === 0){ ziel.innerHTML = "<div class='leer'>Noch keine Zonen.</div>"; return; }
+  ziel.innerHTML = "";
+  zonen.forEach(z => {
+    const div = document.createElement("div");
+    div.className = "zeile";
+    div.innerHTML = "<div class='kopf'><span style='font-size:18px;'>🚧</span>" +
+      "<div style='flex:1;'><div class='titel'>" + z.name + "</div><div class='sub'>Radius " + z.radius + " m</div></div>" +
+      "<button class='btn hell klein' data-a='karte'>🗺️</button>" +
+      "<button class='btn rot klein' data-a='del'>🗑</button></div>";
+    div.querySelector("[data-a='karte']").onclick = () => { zeige("karte"); map.setView([z.lat, z.lng], 15); };
+    div.querySelector("[data-a='del']").onclick = () => {
+      if (!confirm("Zone '" + z.name + "' löschen?")) return;
+      zonen = zonen.filter(x => x.id !== z.id); speichereZonen();
+    };
+    ziel.appendChild(div);
+  });
+}
+
+/* ================= Fahrtenbuch ================= */
+function zeichneFahrtenbuch(){
+  const gesamtKm = trips.reduce((s, t) => s + (t.km || 0), 0);
+  const gesamtZeit = trips.reduce((s, t) => s + (t.ende - t.start), 0);
+  $("fbSumme").innerHTML = "<b>" + trips.length + "</b> Fahrten · <b>" + gesamtKm.toFixed(1) +
+    "</b> km · <b>" + fmtDauer(gesamtZeit) + "</b> gesamt";
+  const ziel = $("tripListe");
+  if (trips.length === 0){ ziel.innerHTML = "<div class='leer'>Noch keine Fahrten aufgezeichnet.<br>Starte deine erste Fahrt im Tab „Fahrt“.</div>"; return; }
+  ziel.innerHTML = "";
+  trips.forEach(t => {
+    const div = document.createElement("div");
+    div.className = "zeile";
+    div.innerHTML =
+      "<div class='kopf' style='cursor:pointer;'><span style='font-size:20px;'>🚌</span><div style='flex:1;'>" +
+      "<div class='titel'>" + fmtDatum(t.start) + "</div>" +
+      "<div class='sub'>" + fmtZeit(t.start) + " – " + fmtZeit(t.ende) + " Uhr · " + fmtDauer(t.ende - t.start) +
+      " · " + (t.km || 0).toFixed(1) + " km" + (t.tourName ? " · " + t.tourName : "") + "</div></div>" +
+      "<span class='pfeil'>▸</span></div>" +
+      "<div class='detail hidden'>" +
+      (t.ereignisse && t.ereignisse.length
+        ? t.ereignisse.map(e => "<div class='ereignis'><b>" + fmtZeit(e.t) + "</b> – " + e.typ + " " + e.zone + "</div>").join("")
+        : "<div class='ereignis'>Keine Zonen-Ereignisse.</div>") +
+      "<div style='display:flex; gap:8px; margin-top:10px;'>" +
+      "<button class='btn hell klein' data-a='karte'>🗺️ Route zeigen</button>" +
+      "<button class='btn rot klein' data-a='del'>🗑 Löschen</button></div></div>";
+    div.querySelector(".kopf").onclick = () => {
+      const d = div.querySelector(".detail");
+      d.classList.toggle("hidden");
+      div.querySelector(".pfeil").textContent = d.classList.contains("hidden") ? "▸" : "▾";
+    };
+    div.querySelector("[data-a='karte']").onclick = () => {
+      if (!t.punkte || t.punkte.length < 2){ banner("Für diese Fahrt wurden zu wenige GPS-Punkte gespeichert."); return; }
+      zeige("karte"); zeigePfad(t.punkte);
+    };
+    div.querySelector("[data-a='del']").onclick = () => {
+      if (!confirm("Diese Fahrt aus dem Fahrtenbuch löschen?")) return;
+      trips = trips.filter(x => x.id !== t.id);
+      store.set("sf_trips", trips); zeichneFahrtenbuch();
+    };
+    ziel.appendChild(div);
+  });
+}
+
+$("csvBtn").addEventListener("click", () => {
+  if (trips.length === 0){ banner("Noch keine Fahrten vorhanden."); return; }
+  const zeilen = [["Datum","Start","Ende","Dauer","Strecke (km)","Tour","Ereignisse"].join(";")];
+  trips.forEach(t => {
+    const ev = (t.ereignisse || []).map(e => fmtZeit(e.t) + " " + e.typ + " " + e.zone).join(" | ");
+    zeilen.push([
+      new Date(t.start).toLocaleDateString("de-DE"),
+      fmtZeit(t.start), fmtZeit(t.ende), fmtDauer(t.ende - t.start),
+      (t.km || 0).toFixed(2).replace(".", ","),
+      t.tourName || "", ev
+    ].map(x => '"' + String(x).replace(/"/g, '""') + '"').join(";"));
+  });
+  const blob = new Blob(["﻿" + zeilen.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "fahrtenbuch_" + new Date().toISOString().slice(0, 10) + ".csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+/* ================= Konto ================= */
+$("logoutBtn").addEventListener("click", () => location.reload());
+$("resetBtn").addEventListener("click", () => {
+  if (!confirm("Wirklich ALLE Daten löschen (Fahrten, Touren, Zonen, Konto)?")) return;
+  if (!confirm("Letzte Warnung – das kann nicht rückgängig gemacht werden!")) return;
+  localStorage.clear(); location.reload();
+});
+
+/* ================= Start ================= */
+function appStart(){
+  $("loginScreen").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  $("profilInfo").innerHTML = "Angemeldet als <b>" + profil.name + "</b>";
+  karteInit();
+  fuelleTourWahl();
+  zeichneTouren(); zeichneZonenListe(); zeichneFahrtenbuch();
+  uhrTick(); uhrTimer = setInterval(uhrTick, 1000);
+  if (aktiveFahrt){ // App wurde während einer Fahrt neu geladen → weiter aufzeichnen
+    zonenStatus = {}; zonen.forEach(z => zonenStatus[z.id] = false);
+    gpsStarten(); wakeLockAnfordern();
+    banner("Laufende Fahrt fortgesetzt (Start " + fmtZeit(aktiveFahrt.start) + ")");
+  }
+  fahrtUiAktualisieren();
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")){
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+}
+</script>
+</body>
+</html>
