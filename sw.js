@@ -1,6 +1,6 @@
 /* Service Worker: macht die App-Oberfläche offline nutzbar (Kartenkacheln brauchen weiterhin Internet).
    Strategie: erst Netzwerk (damit Updates sofort ankommen), bei Offline-Betrieb aus dem Cache. */
-const CACHE = "schulbus-fahrer-v2";
+const CACHE = "schulbus-fahrer-v3"; // Version 1.1
 const DATEIEN = [
   "./",
   "./index.html",
@@ -34,6 +34,6 @@ self.addEventListener("fetch", e => {
         caches.open(CACHE).then(c => c.put(e.request, kopie));
       }
       return antwort;
-    }).catch(() => caches.match(e.request))
+    }).catch(() => caches.match(e.request, { ignoreSearch: url.origin === location.origin }))
   );
 });

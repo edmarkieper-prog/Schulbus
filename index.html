@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://unpkg.com; connect-src 'self' https://nominatim.openstreetmap.org https://tile.openstreetmap.org https://unpkg.com; worker-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#1e3a5f">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -10,7 +12,8 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="icon" href="icon-192.png">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
 <style>
   :root{
     --blau:#1e3a5f; --blau-hell:#2c5282; --gelb:#ffc107; --gelb-dunkel:#e6a800;
@@ -209,6 +212,18 @@
         <div class="stat"><div class="w" id="stKm">–</div><div class="l">km</div></div>
         <div class="stat"><div class="w" id="stTempo">–</div><div class="l">km/h</div></div>
       </div>
+      <div class="card" style="margin-top:14px;">
+        <h2>Heute &amp; dieser Monat</h2>
+        <div class="statGrid" style="grid-template-columns:1fr 1fr; margin-top:0;">
+          <div class="stat"><div class="w" id="stHeuteKm">0,0</div><div class="l">km heute</div></div>
+          <div class="stat"><div class="w" id="stHeuteZeit">0 min</div><div class="l">Fahrzeit heute</div></div>
+          <div class="stat"><div class="w" id="stMonatKm">0,0</div><div class="l" id="stMonatKmL">km im Monat</div></div>
+          <div class="stat"><div class="w" id="stMonatZeit">0 min</div><div class="l">Fahrzeit im Monat</div></div>
+        </div>
+        <p style="font-size:12px; color:var(--text2); margin-top:8px; text-align:center;">
+          Zählt automatisch bis Monatsende zusammen und beginnt dann neu.
+        </p>
+      </div>
       <div class="card" id="liveEventsCard" style="margin-top:14px;">
         <h2>Ereignisse dieser Fahrt</h2>
         <div id="liveEvents"><div class="leer">Noch keine Ereignisse.</div></div>
@@ -261,7 +276,11 @@
       <div class="card">
         <h2>Info</h2>
         <p style="font-size:14px; color:var(--text2);">
-          Alle Daten werden nur auf diesem Gerät gespeichert. Version 1.0 (Prototyp).
+          Alle Daten werden nur auf diesem Gerät gespeichert. <b>Version 1.1</b><br><br>
+          Neu in 1.1:<br>
+          • Standort-Protokoll auf der Karte (Uhrzeit + km-Stand)<br>
+          • Kilometer und Fahrzeit pro Tag und pro Monat<br>
+          • Sicherheits-Update (geprüfte Kartenbibliothek, strengere Schutzregeln)
         </p>
       </div>
     </section>
@@ -279,7 +298,8 @@
 <div id="banner"></div>
 <div id="modalWrap" class="hidden"><div id="modal"></div></div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
 <script>
 "use strict";
 /* ================= Speicher ================= */
@@ -301,6 +321,27 @@ const fmtDatum = t => new Date(t).toLocaleDateString("de-DE", {weekday:"short", 
 function fmtDauer(ms){
   const s = Math.floor(ms/1000), h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
   return (h>0 ? h+" h " : "") + m + " min";
+}
+/* ---- Tages- und Monatssummen ---- */
+function tagesAnfang(){ const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); }
+function monatsAnfang(){ const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).getTime(); }
+function tripsImZeitraum(ab){ return trips.filter(t => t.start >= ab); }
+function summe(liste){
+  return {
+    km:   liste.reduce((s, t) => s + (t.km || 0), 0),
+    zeit: liste.reduce((s, t) => s + ((t.ende || t.start) - t.start), 0)
+  };
+}
+/* Summen inkl. der gerade laufenden Fahrt */
+function statistik(){
+  const heute = summe(tripsImZeitraum(tagesAnfang()));
+  const monat = summe(tripsImZeitraum(monatsAnfang()));
+  if (aktiveFahrt){
+    const laufKm = aktiveFahrt.km || 0, laufZeit = Date.now() - aktiveFahrt.start;
+    heute.km += laufKm; heute.zeit += laufZeit;
+    monat.km += laufKm; monat.zeit += laufZeit;
+  }
+  return { heute, monat };
 }
 function haversine(a, b){ // Meter zwischen [lat,lng]-Punkten
   const R = 6371000, rad = x => x*Math.PI/180;
@@ -352,7 +393,7 @@ function zeige(v){
 }
 
 /* ================= Karte ================= */
-let map, ebeneStops, ebeneZonen, ebenePfad, liveMarker;
+let map, ebeneStops, ebeneZonen, ebenePfad, ebeneProtokoll, liveMarker, livePfad;
 let pickModus = null; // {typ:'stop'|'zone', weiter:fn}
 function karteInit(){
   map = L.map("map").setView([51.163, 10.447], 6);
@@ -362,6 +403,7 @@ function karteInit(){
   ebeneZonen = L.layerGroup().addTo(map);
   ebeneStops = L.layerGroup().addTo(map);
   ebenePfad  = L.layerGroup().addTo(map);
+  ebeneProtokoll = L.layerGroup().addTo(map);
   map.on("click", e => {
     if (!pickModus) return;
     const m = pickModus; pickModus = null;
@@ -406,13 +448,24 @@ function zeichneStops(){
       .bindPopup("🚏 <b>"+s.name+"</b>").addTo(ebeneStops);
   });
 }
-function zeigePfad(punkte){
+function zeigePfad(punkte, protokoll){
   ebenePfad.clearLayers();
+  zeichneProtokoll(protokoll);
   if (!punkte || punkte.length < 2) return;
   const ll = punkte.map(p => [p[0], p[1]]);
   const linie = L.polyline(ll, { color: "#c62828", weight: 4 }).addTo(ebenePfad);
   map.invalidateSize(); // Karte war evtl. gerade noch ausgeblendet
   map.fitBounds(linie.getBounds(), { padding: [30, 30] });
+}
+/* Standort-Protokoll: kleine Punkte mit Uhrzeit und km-Stand auf der Karte */
+function zeichneProtokoll(eintraege){
+  ebeneProtokoll.clearLayers();
+  (eintraege || []).forEach(p => {
+    L.circleMarker([p.lat, p.lng], { radius: 6, color: "#fff", weight: 2, fillColor: "#e6a800", fillOpacity: 1 })
+      .bindPopup("🕐 <b>" + fmtZeit(p.t) + " Uhr</b><br>Fahrt: " + p.km.toFixed(1).replace(".", ",") +
+                 " km<br>km-Stand Monat: " + p.kmMonat.toFixed(1).replace(".", ",") + " km")
+      .addTo(ebeneProtokoll);
+  });
 }
 
 /* ================= Fahrt / GPS ================= */
@@ -423,6 +476,16 @@ function uhrTick(){
   $("uhr").textContent = jetzt.toLocaleTimeString("de-DE", {hour:"2-digit", minute:"2-digit", second:"2-digit"});
   $("datum").textContent = fmtDatum(jetzt);
   if (aktiveFahrt) $("stDauer").textContent = fmtDauer(Date.now() - aktiveFahrt.start);
+  if (jetzt.getSeconds() % 5 === 0 || aktiveFahrt) statistikAnzeigen();
+}
+
+function statistikAnzeigen(){
+  const s = statistik();
+  $("stHeuteKm").textContent   = s.heute.km.toFixed(1).replace(".", ",");
+  $("stHeuteZeit").textContent = fmtDauer(s.heute.zeit);
+  $("stMonatKm").textContent   = s.monat.km.toFixed(1).replace(".", ",");
+  $("stMonatZeit").textContent = fmtDauer(s.monat.zeit);
+  $("stMonatKmL").textContent  = "km im " + new Date().toLocaleDateString("de-DE", { month: "long" });
 }
 
 $("startBtn").addEventListener("click", () => { aktiveFahrt ? fahrtBeenden() : fahrtStarten(); });
@@ -432,8 +495,10 @@ function fahrtStarten(){
   const tour = touren.find(t => t.id === $("tourWahl").value);
   aktiveFahrt = {
     id: uid(), start: Date.now(), tourId: tour ? tour.id : "", tourName: tour ? tour.name : "",
-    punkte: [], km: 0, ereignisse: []
+    punkte: [], km: 0, ereignisse: [],
+    protokoll: [], kmMonatStart: summe(tripsImZeitraum(monatsAnfang())).km
   };
+  zeichneProtokoll([]);
   zonenStatus = {}; zonen.forEach(z => zonenStatus[z.id] = false);
   store.set("sf_aktiv", aktiveFahrt);
   gpsStarten();
@@ -452,7 +517,8 @@ function fahrtBeenden(){
   const f = aktiveFahrt;
   aktiveFahrt = null; store.del("sf_aktiv");
   if (wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; }
-  fahrtUiAktualisieren(); zeichneFahrtenbuch();
+  if (livePfad){ ebenePfad.removeLayer(livePfad); livePfad = null; }
+  fahrtUiAktualisieren(); zeichneFahrtenbuch(); statistikAnzeigen();
   banner("Fahrt beendet: " + fmtDauer(f.ende - f.start) + ", " + f.km.toFixed(1) + " km 📖");
 }
 
@@ -477,12 +543,29 @@ function gpsPunkt(pos){
     if (dt > 0 && d / dt < 70) aktiveFahrt.km += d / 1000; // >250 km/h = GPS-Sprung, ignorieren
   }
   aktiveFahrt.punkte.push(p);
+  standortProtokollieren(lat, lng);
   store.set("sf_aktiv", aktiveFahrt);
   setzeLiveMarker([lat, lng]);
+  if (!livePfad){ livePfad = L.polyline([[lat, lng]], { color: "#c62828", weight: 4 }).addTo(ebenePfad); }
+  else livePfad.addLatLng([lat, lng]);
   if (aktuelleAnsicht === "karte" && !pickModus) map.panTo([lat, lng]);
   $("stKm").textContent = aktiveFahrt.km.toFixed(1);
   $("stTempo").textContent = speed != null ? Math.round(speed * 3.6) : "–";
   zonenPruefen(lat, lng);
+}
+
+/* Alle 60 Sekunden einen Standort mit Uhrzeit und km-Stand festhalten */
+function standortProtokollieren(lat, lng){
+  if (!aktiveFahrt.protokoll) aktiveFahrt.protokoll = [];
+  const letzter = aktiveFahrt.protokoll[aktiveFahrt.protokoll.length - 1];
+  if (letzter && Date.now() - letzter.t < 60000) return;
+  const km = Math.round(aktiveFahrt.km * 10) / 10;
+  const eintrag = {
+    t: Date.now(), lat, lng, km,
+    kmMonat: Math.round(((aktiveFahrt.kmMonatStart || 0) + km) * 10) / 10
+  };
+  aktiveFahrt.protokoll.push(eintrag);
+  zeichneProtokoll(aktiveFahrt.protokoll);
 }
 
 function zonenPruefen(lat, lng){
@@ -630,7 +713,7 @@ function zeichneTouren(){
         "<button class='btn hell klein' title='Halt löschen'>🗑</button>";
       z.querySelector("input").onchange = ev => { s.done = ev.target.checked; speichereTouren(); };
       z.querySelector("button[title='Navigation starten']").onclick = () =>
-        window.open("https://www.google.com/maps/dir/?api=1&destination=" + s.lat + "," + s.lng + "&travelmode=driving", "_blank");
+        window.open("https://www.google.com/maps/dir/?api=1&destination=" + s.lat + "," + s.lng + "&travelmode=driving", "_blank", "noopener,noreferrer");
       z.querySelector("button[title='Halt löschen']").onclick = () => {
         if (!confirm("Haltestelle '" + s.name + "' löschen?")) return;
         t.stops = t.stops.filter(x => x.id !== s.id); speichereTouren();
@@ -704,8 +787,14 @@ function zeichneZonenListe(){
 function zeichneFahrtenbuch(){
   const gesamtKm = trips.reduce((s, t) => s + (t.km || 0), 0);
   const gesamtZeit = trips.reduce((s, t) => s + (t.ende - t.start), 0);
-  $("fbSumme").innerHTML = "<b>" + trips.length + "</b> Fahrten · <b>" + gesamtKm.toFixed(1) +
-    "</b> km · <b>" + fmtDauer(gesamtZeit) + "</b> gesamt";
+  const heute = summe(tripsImZeitraum(tagesAnfang()));
+  const monat = summe(tripsImZeitraum(monatsAnfang()));
+  const monatName = new Date().toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+  $("fbSumme").innerHTML =
+    "Heute: <b>" + heute.km.toFixed(1).replace(".", ",") + " km</b> · <b>" + fmtDauer(heute.zeit) + "</b> Fahrzeit<br>" +
+    monatName + ": <b>" + monat.km.toFixed(1).replace(".", ",") + " km</b> · <b>" + fmtDauer(monat.zeit) + "</b> Fahrzeit<br>" +
+    "<span style='color:var(--text2);'>Insgesamt: " + trips.length + " Fahrten · " + gesamtKm.toFixed(1).replace(".", ",") +
+    " km · " + fmtDauer(gesamtZeit) + "</span>";
   const ziel = $("tripListe");
   if (trips.length === 0){ ziel.innerHTML = "<div class='leer'>Noch keine Fahrten aufgezeichnet.<br>Starte deine erste Fahrt im Tab „Fahrt“.</div>"; return; }
   ziel.innerHTML = "";
@@ -722,6 +811,11 @@ function zeichneFahrtenbuch(){
       (t.ereignisse && t.ereignisse.length
         ? t.ereignisse.map(e => "<div class='ereignis'><b>" + fmtZeit(e.t) + "</b> – " + e.typ + " " + e.zone + "</div>").join("")
         : "<div class='ereignis'>Keine Zonen-Ereignisse.</div>") +
+      (t.protokoll && t.protokoll.length
+        ? "<div class='ereignis' style='margin-top:4px;'><b>📍 Standort-Protokoll (" + t.protokoll.length + " Einträge):</b></div>" +
+          t.protokoll.map(p => "<div class='ereignis'><b>" + fmtZeit(p.t) + "</b> – km-Stand: " +
+            p.km.toFixed(1).replace(".", ",") + " km (Monat: " + p.kmMonat.toFixed(1).replace(".", ",") + " km)</div>").join("")
+        : "") +
       "<div style='display:flex; gap:8px; margin-top:10px;'>" +
       "<button class='btn hell klein' data-a='karte'>🗺️ Route zeigen</button>" +
       "<button class='btn rot klein' data-a='del'>🗑 Löschen</button></div></div>";
@@ -732,7 +826,7 @@ function zeichneFahrtenbuch(){
     };
     div.querySelector("[data-a='karte']").onclick = () => {
       if (!t.punkte || t.punkte.length < 2){ banner("Für diese Fahrt wurden zu wenige GPS-Punkte gespeichert."); return; }
-      zeige("karte"); zeigePfad(t.punkte);
+      zeige("karte"); zeigePfad(t.punkte, t.protokoll);
     };
     div.querySelector("[data-a='del']").onclick = () => {
       if (!confirm("Diese Fahrt aus dem Fahrtenbuch löschen?")) return;
@@ -745,14 +839,17 @@ function zeichneFahrtenbuch(){
 
 $("csvBtn").addEventListener("click", () => {
   if (trips.length === 0){ banner("Noch keine Fahrten vorhanden."); return; }
-  const zeilen = [["Datum","Start","Ende","Dauer","Strecke (km)","Tour","Ereignisse"].join(";")];
+  const zeilen = [["Datum","Start","Ende","Dauer","Strecke (km)","km-Stand Monat","Tour","Ereignisse","Standort-Protokoll"].join(";")];
   trips.forEach(t => {
     const ev = (t.ereignisse || []).map(e => fmtZeit(e.t) + " " + e.typ + " " + e.zone).join(" | ");
+    const prot = (t.protokoll || []).map(p => fmtZeit(p.t) + " km " + p.km.toFixed(1).replace(".", ",")).join(" | ");
+    const kmMonat = t.kmMonatStart != null ? ((t.kmMonatStart + (t.km || 0)).toFixed(1).replace(".", ",")) : "";
     zeilen.push([
       new Date(t.start).toLocaleDateString("de-DE"),
       fmtZeit(t.start), fmtZeit(t.ende), fmtDauer(t.ende - t.start),
       (t.km || 0).toFixed(2).replace(".", ","),
-      t.tourName || "", ev
+      kmMonat,
+      t.tourName || "", ev, prot
     ].map(x => '"' + String(x).replace(/"/g, '""') + '"').join(";"));
   });
   const blob = new Blob(["﻿" + zeilen.join("\r\n")], { type: "text/csv;charset=utf-8" });
@@ -781,11 +878,15 @@ function appStart(){
   zeichneTouren(); zeichneZonenListe(); zeichneFahrtenbuch();
   uhrTick(); uhrTimer = setInterval(uhrTick, 1000);
   if (aktiveFahrt){ // App wurde während einer Fahrt neu geladen → weiter aufzeichnen
+    if (!aktiveFahrt.protokoll) aktiveFahrt.protokoll = []; // Fahrt aus Version 1.0 übernehmen
+    if (aktiveFahrt.kmMonatStart == null) aktiveFahrt.kmMonatStart = summe(tripsImZeitraum(monatsAnfang())).km;
     zonenStatus = {}; zonen.forEach(z => zonenStatus[z.id] = false);
+    zeichneProtokoll(aktiveFahrt.protokoll);
     gpsStarten(); wakeLockAnfordern();
     banner("Laufende Fahrt fortgesetzt (Start " + fmtZeit(aktiveFahrt.start) + ")");
   }
   fahrtUiAktualisieren();
+  statistikAnzeigen();
   if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")){
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
