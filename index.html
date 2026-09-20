@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://unpkg.com; connect-src 'self' https://nominatim.openstreetmap.org https://tile.openstreetmap.org https://unpkg.com; worker-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://unpkg.com; connect-src 'self' https://nominatim.openstreetmap.org https://tile.openstreetmap.org https://unpkg.com https://router.project-osrm.org; worker-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#1e3a5f">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -250,6 +250,18 @@
         <div id="fbSumme" style="font-size:15px;"></div>
         <button class="btn hell klein" id="csvBtn" style="margin-top:10px;">⬇ Als CSV exportieren</button>
       </div>
+      <div class="card">
+        <h2>📄 Kilometer-Blatt (Köhler App)</h2>
+        <div id="kmBlattListe"></div>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+          <button class="btn klein" id="kmBlattSpeichernBtn">💾 Blatt „Kilometer" speichern</button>
+          <button class="btn rot klein" id="kmBlattLoeschenBtn">🗑 Alles löschen</button>
+        </div>
+        <p style="font-size:12px; color:var(--text2); margin-top:8px;">
+          Jeder ⏹&nbsp;Stop trägt die gefahrenen Kilometer hier ein (Vormittag / Mittag / Nachmittag).
+          Am Monatsende: erst 💾 speichern, dann auf deinen Wunsch 🗑 löschen.
+        </p>
+      </div>
       <div id="tripListe"></div>
     </section>
 
@@ -276,8 +288,14 @@
       <div class="card">
         <h2>Info</h2>
         <p style="font-size:14px; color:var(--text2);">
-          Alle Daten werden nur auf diesem Gerät gespeichert. <b>Version 1.1</b><br><br>
-          Neu in 1.1:<br>
+          Alle Daten werden nur auf diesem Gerät gespeichert. <b>Version 1.2</b><br><br>
+          Neu in 1.2:<br>
+          • Deine 3 Touren (Vormittag, Mittag 12:20, Nachmittag 15:20) sind fest eingebaut<br>
+          • 🗺️ „Route zeigen“: die ganze Tour als Strecke auf der Karte, mit km und Fahrzeit<br>
+          • 🧭 „Tour-Navi“: Google Maps navigiert die komplette Tour mit allen Halten<br>
+          • ⏹ Stop-Knopf trägt die Kilometer ins neue Kilometer-Blatt ein (Vormittag/Mittag/Nachmittag)<br>
+          • 📄 Kilometer-Blatt: Monatssumme, Speichern in „Köhler App“, Löschen nur auf deinen Wunsch<br><br>
+          Aus Version 1.1:<br>
           • Standort-Protokoll auf der Karte (Uhrzeit + km-Stand)<br>
           • Kilometer und Fahrzeit pro Tag und pro Monat<br>
           • Sicherheits-Update (geprüfte Kartenbibliothek, strengere Schutzregeln)
@@ -313,6 +331,7 @@ let trips   = store.get("sf_trips", []);
 let touren  = store.get("sf_touren", []);
 let zonen   = store.get("sf_zonen", []);
 let aktiveFahrt = store.get("sf_aktiv", null);
+let kmBlatt = store.get("sf_kmblatt", []); // Neu in 1.2: Kilometer-Blatt für die Köhler App
 
 const $ = id => document.getElementById(id);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -393,7 +412,7 @@ function zeige(v){
 }
 
 /* ================= Karte ================= */
-let map, ebeneStops, ebeneZonen, ebenePfad, ebeneProtokoll, liveMarker, livePfad;
+let map, ebeneStops, ebeneZonen, ebenePfad, ebeneProtokoll, ebeneRoute, liveMarker, livePfad;
 let pickModus = null; // {typ:'stop'|'zone', weiter:fn}
 function karteInit(){
   map = L.map("map").setView([51.163, 10.447], 6);
@@ -401,6 +420,7 @@ function karteInit(){
     maxZoom: 19, attribution: "© OpenStreetMap"
   }).addTo(map);
   ebeneZonen = L.layerGroup().addTo(map);
+  ebeneRoute = L.layerGroup().addTo(map);
   ebeneStops = L.layerGroup().addTo(map);
   ebenePfad  = L.layerGroup().addTo(map);
   ebeneProtokoll = L.layerGroup().addTo(map);
@@ -437,9 +457,9 @@ function zeichneZonen(){
       .bindPopup("🚧 Zone: <b>"+z.name+"</b><br>Radius "+z.radius+" m").addTo(ebeneZonen);
   });
 }
-function zeichneStops(){
+function zeichneStops(tourDirekt){
   ebeneStops.clearLayers();
-  const tour = touren.find(t => t.id === $("tourWahl").value);
+  const tour = tourDirekt || touren.find(t => t.id === $("tourWahl").value);
   if (!tour) return;
   tour.stops.forEach((s, i) => {
     L.marker([s.lat, s.lng], { icon: L.divIcon({ className: "", html:
@@ -448,6 +468,53 @@ function zeichneStops(){
       .bindPopup("🚏 <b>"+s.name+"</b>").addTo(ebeneStops);
   });
 }
+/* Neu in 1.2: Fahrstrecke einer Tour über die Straßen berechnen und auf der Karte zeigen */
+const routenCache = {};
+async function tourRouteZeigen(t){
+  if (!t.stops || t.stops.length < 2){ banner("Diese Tour braucht mindestens 2 Haltestellen."); return; }
+  zeige("karte");
+  zeichneStops(t);
+  ebeneRoute.clearLayers();
+  banner("🗺️ Route wird berechnet…");
+  try{
+    let geo = routenCache[t.id + "_" + t.stops.length];
+    if (!geo){
+      const koords = t.stops.map(s => s.lng + "," + s.lat).join(";");
+      const r = await fetch("https://router.project-osrm.org/route/v1/driving/" + koords + "?overview=full&geometries=geojson");
+      const dat = await r.json();
+      if (!dat.routes || !dat.routes.length) throw new Error("keine Route");
+      geo = {
+        punkte: dat.routes[0].geometry.coordinates.map(c => [c[1], c[0]]),
+        km: dat.routes[0].distance / 1000,
+        min: Math.round(dat.routes[0].duration / 60)
+      };
+      routenCache[t.id + "_" + t.stops.length] = geo;
+    }
+    const linie = L.polyline(geo.punkte, { color: "#1976d2", weight: 5, opacity: .85 }).addTo(ebeneRoute);
+    map.invalidateSize();
+    map.fitBounds(linie.getBounds(), { padding: [30, 30] });
+    banner("🗺️ " + t.name + ": " + geo.km.toFixed(1).replace(".", ",") + " km · ca. " + geo.min + " min Fahrzeit");
+  }catch(e){
+    // Notlösung ohne Internet: gerade Linien zwischen den Halten
+    const linie = L.polyline(t.stops.map(s => [s.lat, s.lng]), { color: "#1976d2", weight: 4, dashArray: "8 8" }).addTo(ebeneRoute);
+    map.invalidateSize();
+    map.fitBounds(linie.getBounds(), { padding: [30, 30] });
+    banner("Route konnte nicht berechnet werden (Internet?). Zeige direkte Verbindung.");
+  }
+}
+
+/* Neu in 1.2: ganze Tour mit allen Halten an Google Maps übergeben */
+function tourNavi(t){
+  if (!t.stops || t.stops.length === 0){ banner("Diese Tour hat noch keine Haltestellen."); return; }
+  const ziel = t.stops[t.stops.length - 1];
+  let url = "https://www.google.com/maps/dir/?api=1&destination=" + ziel.lat + "," + ziel.lng + "&travelmode=driving";
+  if (t.stops.length > 1){
+    const zwischen = t.stops.slice(0, -1).map(s => s.lat + "," + s.lng).join("|");
+    url += "&waypoints=" + encodeURIComponent(zwischen);
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 function zeigePfad(punkte, protokoll){
   ebenePfad.clearLayers();
   zeichneProtokoll(protokoll);
@@ -508,7 +575,7 @@ function fahrtStarten(){
 }
 
 function fahrtBeenden(){
-  if (!confirm("Fahrt wirklich beenden?")) return;
+  if (!confirm("⏹ Stop – Fahrt beenden und Kilometer ins Kilometer-Blatt eintragen?")) return;
   gpsStoppen();
   aktiveFahrt.ende = Date.now();
   aktiveFahrt.km = Math.round(aktiveFahrt.km * 100) / 100;
@@ -518,8 +585,9 @@ function fahrtBeenden(){
   aktiveFahrt = null; store.del("sf_aktiv");
   if (wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; }
   if (livePfad){ ebenePfad.removeLayer(livePfad); livePfad = null; }
+  kilometerEintragen(f); // Neu in 1.2: Eintrag ins Kilometer-Blatt
   fahrtUiAktualisieren(); zeichneFahrtenbuch(); statistikAnzeigen();
-  banner("Fahrt beendet: " + fmtDauer(f.ende - f.start) + ", " + f.km.toFixed(1) + " km 📖");
+  banner("⏹ Stop: " + fmtDauer(f.ende - f.start) + ", " + f.km.toFixed(1).replace(".", ",") + " km ins Kilometer-Blatt eingetragen 📄");
 }
 
 function gpsStarten(){
@@ -591,7 +659,7 @@ document.addEventListener("visibilitychange", () => {
 
 function fahrtUiAktualisieren(){
   const laeuft = !!aktiveFahrt;
-  $("startBtn").textContent = laeuft ? "⏹  Fahrt beenden" : "▶  Fahrt starten";
+  $("startBtn").textContent = laeuft ? "⏹  Stop" : "▶  Fahrt starten";
   $("startBtn").classList.toggle("laeuft", laeuft);
   $("tripDot").classList.toggle("live", laeuft);
   $("tourWahl").disabled = laeuft;
@@ -679,6 +747,43 @@ function ortWaehlen(titel, weiter){
 /* ================= Aufträge / Touren ================= */
 function speichereTouren(){ store.set("sf_touren", touren); zeichneTouren(); fuelleTourWahl(); zeichneStops(); }
 
+/* Neu in 1.2: die drei festen Touren werden beim ersten Start automatisch angelegt */
+function v12TourenAnlegen(){
+  if (store.get("sf_v12touren", false)) return;
+  const anlegen = (name, liste) => {
+    if (touren.some(t => t.name === name)) return;
+    touren.push({ id: uid(), name,
+      stops: liste.map(s => ({ id: uid(), name: s[0], lat: s[1], lng: s[2], done: false })) });
+  };
+  anlegen("Vormittagstour Wangen", [
+    ["Baumannstraße 82/80",              47.6856544, 9.8186097],
+    ["August-Lämmle-Weg 21",             47.6892047, 9.8210435],
+    ["Maria-Knöpfler-Straße 19",         47.6940455, 9.8183430],
+    ["August-Braun-Straße 9",            47.7006065, 9.8242834],
+    ["August-Braun-Straße 17",           47.7004671, 9.8236916],
+    ["Franz-Joseph-Spiegler-Straße 17",  47.7007976, 9.8259556],
+    ["Karl-Speidel-Straße 5",            47.6937496, 9.8311269]
+  ]);
+  anlegen("Mittagstour 12:20 Uhr", [
+    ["Leutkirch, Tautenhofer Berg 14",   47.8052770, 9.9731947],
+    ["Bad Wurzach, Erlenweg 12",         47.8934942, 9.9705005],
+    ["Aichstetten, Inselstraße 16",      47.8963108, 10.0785455],
+    ["Aichstetten, Lärchenstraße 5",     47.9000997, 10.0813651],
+    ["Aitrach, Oberhausen 2",            47.9209604, 10.0810802]
+  ]);
+  anlegen("Nachmittagstour 15:20 Uhr", [
+    ["Karl-Speidel-Straße 5",            47.6937496, 9.8311269],
+    ["August-Braun-Straße 9",            47.7006065, 9.8242834],
+    ["August-Braun-Straße 17",           47.7004671, 9.8236916],
+    ["Franz-Joseph-Spiegler-Straße 17",  47.7007976, 9.8259556],
+    ["Maria-Knöpfler-Straße 19",         47.6940455, 9.8183430],
+    ["August-Lämmle-Weg 21",             47.6892047, 9.8210435],
+    ["Baumannstraße 82/80",              47.6856544, 9.8186097]
+  ]);
+  store.set("sf_v12touren", true);
+  store.set("sf_touren", touren);
+}
+
 $("neueTourBtn").addEventListener("click", () => {
   const name = prompt("Name der Tour (z. B. 'Morgentour Grundschule'):");
   if (!name || !name.trim()) return;
@@ -700,6 +805,9 @@ function zeichneTouren(){
       "<div class='sub'>" + t.stops.length + " Haltestellen · " + fertig + " erledigt</div></div>" +
       "<button class='btn hell klein' data-a='stop'>＋ Halt</button>" +
       "<button class='btn rot klein' data-a='del'>🗑</button></div>" +
+      "<div style='display:flex; gap:8px; margin-top:10px;'>" +
+      "<button class='btn klein' data-a='route' style='flex:1;'>🗺️ Route zeigen</button>" +
+      "<button class='btn gelb klein' data-a='navi' style='flex:1;'>🧭 Tour-Navi</button></div>" +
       "<div class='stops'></div>" +
       (t.stops.some(s => s.done) ? "<button class='btn hell klein' data-a='reset' style='margin-top:10px;'>↺ Häkchen zurücksetzen</button>" : "");
     const stopsDiv = div.querySelector(".stops");
@@ -730,6 +838,8 @@ function zeichneTouren(){
         zeige("auftraege");
       });
     };
+    div.querySelector("[data-a='route']").onclick = () => tourRouteZeigen(t);
+    div.querySelector("[data-a='navi']").onclick = () => tourNavi(t);
     div.querySelector("[data-a='del']").onclick = () => {
       if (!confirm("Tour '" + t.name + "' komplett löschen?")) return;
       touren = touren.filter(x => x.id !== t.id); speichereTouren();
@@ -860,6 +970,127 @@ $("csvBtn").addEventListener("click", () => {
   URL.revokeObjectURL(a.href);
 });
 
+/* ================= Kilometer-Blatt (Neu in 1.2) ================= */
+function zeitraumVon(start){
+  const h = new Date(start).getHours();
+  if (h < 11) return "Vormittag";
+  if (h < 14) return "Mittag";
+  return "Nachmittag";
+}
+function kilometerEintragen(f){
+  kmBlatt.push({
+    t: f.start,
+    zeitraum: zeitraumVon(f.start),
+    tour: f.tourName || "",
+    km: Math.round((f.km || 0) * 10) / 10
+  });
+  store.set("sf_kmblatt", kmBlatt);
+  zeichneKmBlatt();
+}
+function monatsName(t){ return new Date(t).toLocaleDateString("de-DE", { month: "long", year: "numeric" }); }
+function zeichneKmBlatt(){
+  const ziel = $("kmBlattListe");
+  if (kmBlatt.length === 0){ ziel.innerHTML = "<div class='leer'>Noch keine Einträge.<br>Drücke nach der Fahrt auf ⏹ Stop.</div>"; return; }
+  // Nach Monaten gruppieren, neuester zuerst
+  const gruppen = {};
+  kmBlatt.forEach(e => { const m = monatsName(e.t); (gruppen[m] = gruppen[m] || []).push(e); });
+  let html = "";
+  Object.keys(gruppen).reverse().forEach(m => {
+    const liste = gruppen[m];
+    const summe = liste.reduce((s, e) => s + e.km, 0);
+    html += "<div style='font-weight:700; margin-top:8px;'>" + m + " · gesamt " + summe.toFixed(1).replace(".", ",") + " km</div>";
+    liste.slice().reverse().forEach(e => {
+      html += "<div class='ereignis'><b>" + new Date(e.t).toLocaleDateString("de-DE", {weekday:"short", day:"2-digit", month:"2-digit"}) +
+        "</b> · " + e.zeitraum + (e.tour ? " · " + e.tour : "") + " · <b>" + e.km.toFixed(1).replace(".", ",") + " km</b></div>";
+    });
+  });
+  ziel.innerHTML = html;
+}
+function kmBlattCsv(){
+  const zeilen = ["Datum;Zeitraum;Tour;Kilometer"];
+  kmBlatt.forEach(e => {
+    zeilen.push([
+      new Date(e.t).toLocaleDateString("de-DE"),
+      e.zeitraum, e.tour,
+      e.km.toFixed(1).replace(".", ",")
+    ].map(x => '"' + String(x).replace(/"/g, '""') + '"').join(";"));
+  });
+  zeilen.push("");
+  const gruppen = {};
+  kmBlatt.forEach(e => { const m = monatsName(e.t); gruppen[m] = (gruppen[m] || 0) + e.km; });
+  Object.keys(gruppen).forEach(m => zeilen.push('"Summe ' + m + '";;;"' + gruppen[m].toFixed(1).replace(".", ",") + '"'));
+  return "﻿" + zeilen.join("\r\n");
+}
+/* Datei-Merker: die App merkt sich die gewählte Datei (z. B. Desktop → Köhler-App → Kilometer.csv) */
+function idbOeffnen(){
+  return new Promise((res, rej) => {
+    const r = indexedDB.open("sf_dateien", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("h");
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function dateiMerken(h){
+  try{
+    const db = await idbOeffnen();
+    await new Promise((res, rej) => {
+      const tx = db.transaction("h", "readwrite");
+      tx.objectStore("h").put(h, "kilometer");
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+  }catch(e){}
+}
+async function gemerkteDatei(){
+  try{
+    const db = await idbOeffnen();
+    return await new Promise(res => {
+      const g = db.transaction("h").objectStore("h").get("kilometer");
+      g.onsuccess = () => res(g.result || null);
+      g.onerror = () => res(null);
+    });
+  }catch(e){ return null; }
+}
+$("kmBlattSpeichernBtn").addEventListener("click", async () => {
+  if (kmBlatt.length === 0){ banner("Noch keine Einträge im Kilometer-Blatt."); return; }
+  const csv = kmBlattCsv();
+  if (window.showSaveFilePicker){ // PC: direkt in die Datei im Ordner „Köhler App" schreiben
+    try{
+      let h = await gemerkteDatei();
+      if (h){
+        const ok = await h.requestPermission({ mode: "readwrite" });
+        if (ok !== "granted") h = null;
+      }
+      if (!h){
+        h = await window.showSaveFilePicker({
+          suggestedName: "Kilometer.csv",
+          types: [{ description: "Kilometer-Blatt (CSV für Excel)", accept: { "text/csv": [".csv"] } }]
+        });
+        await dateiMerken(h);
+      }
+      const w = await h.createWritable();
+      await w.write(csv); await w.close();
+      banner("💾 Blatt „Kilometer“ gespeichert ✅");
+      return;
+    }catch(e){ if (e && e.name === "AbortError") return; }
+  }
+  // Handy oder ältere Browser: Datei herunterladen
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "Kilometer.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  banner("💾 Kilometer.csv heruntergeladen ✅");
+});
+$("kmBlattLoeschenBtn").addEventListener("click", () => {
+  if (kmBlatt.length === 0){ banner("Das Kilometer-Blatt ist schon leer."); return; }
+  if (!confirm("Alle Einträge im Kilometer-Blatt löschen?\n\nVorher mit 💾 speichern nicht vergessen!")) return;
+  kmBlatt = [];
+  store.set("sf_kmblatt", kmBlatt);
+  zeichneKmBlatt();
+  banner("Kilometer-Blatt geleert 🗑");
+});
+
 /* ================= Konto ================= */
 $("logoutBtn").addEventListener("click", () => location.reload());
 $("resetBtn").addEventListener("click", () => {
@@ -874,8 +1105,9 @@ function appStart(){
   $("app").classList.remove("hidden");
   $("profilInfo").innerHTML = "Angemeldet als <b>" + profil.name + "</b>";
   karteInit();
+  v12TourenAnlegen(); // Neu in 1.2: feste Touren beim ersten Start anlegen
   fuelleTourWahl();
-  zeichneTouren(); zeichneZonenListe(); zeichneFahrtenbuch();
+  zeichneTouren(); zeichneZonenListe(); zeichneFahrtenbuch(); zeichneKmBlatt();
   uhrTick(); uhrTimer = setInterval(uhrTick, 1000);
   if (aktiveFahrt){ // App wurde während einer Fahrt neu geladen → weiter aufzeichnen
     if (!aktiveFahrt.protokoll) aktiveFahrt.protokoll = []; // Fahrt aus Version 1.0 übernehmen
