@@ -239,8 +239,38 @@
 
     <!-- AUFTRÄGE -->
     <section class="view" id="view-auftraege">
+      <div class="card hidden" id="tourNaviCard" style="border:2px solid var(--gelb); background:#fffdf2;"></div>
       <button class="btn gelb voll" id="neueTourBtn" style="margin-bottom:14px;">＋ Neue Tour anlegen</button>
       <div id="tourListe"></div>
+    </section>
+
+    <!-- TELEFON -->
+    <section class="view" id="view-telefon">
+      <div class="card">
+        <h2>📞 Neuer Anruf</h2>
+        <div class="feld">
+          <label>Telefonnummer</label>
+          <input id="telNummer" inputmode="tel" placeholder="z. B. 0175 1234567">
+        </div>
+        <div id="telStartKnoepfe" style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn" id="telEinBtn" style="flex:1;">📥 Eingehender Anruf</button>
+          <button class="btn gelb" id="telAusBtn" style="flex:1;">📤 Wählen &amp; los</button>
+        </div>
+        <div id="telLaufend" class="hidden" style="margin-top:12px; text-align:center;">
+          <div style="font-size:30px; font-weight:800;" id="telTimer">0:00</div>
+          <div style="color:var(--text2); font-size:13px;">Gesprächszeit läuft…</div>
+          <button class="btn rot voll" id="telEndeBtn" style="margin-top:10px;">⏹ Anruf beenden &amp; speichern</button>
+        </div>
+        <p style="font-size:12px; color:var(--text2); margin-top:10px;">
+          Hinweis: Die Anrufliste des Handys darf eine Web-App aus Datenschutzgründen nicht auslesen.
+          Deshalb: Nummer eintippen, Knopf drücken – Datum, Uhrzeit und Gesprächszeit speichert die App automatisch.
+        </p>
+      </div>
+      <div class="card">
+        <h2>Anruf-Liste</h2>
+        <div id="telListe"></div>
+        <button class="btn hell klein" id="telCsvBtn" style="margin-top:10px;">⬇ Als CSV exportieren</button>
+      </div>
     </section>
 
     <!-- FAHRTENBUCH -->
@@ -288,8 +318,12 @@
       <div class="card">
         <h2>Info</h2>
         <p style="font-size:14px; color:var(--text2);">
-          Alle Daten werden nur auf diesem Gerät gespeichert. <b>Version 1.2</b><br><br>
-          Neu in 1.2:<br>
+          Alle Daten werden nur auf diesem Gerät gespeichert. <b>Version 1.4</b><br><br>
+          Neu in 1.4:<br>
+          • ▶ „Tour starten“: das Navi ruft die Halte automatisch nacheinander auf (1 → 2 → 3 …) bis die Tour fertig ist<br>
+          • GPS-Ankunft: erreichst du einen Halt, wird er von selbst abgehakt<br>
+          • 📞 Neuer Tab „Telefon“: Anrufe mit Datum, Uhrzeit, Nummer, Richtung und Gesprächszeit festhalten, mit CSV-Export<br><br>
+          Aus Version 1.2:<br>
           • Deine 3 Touren (Vormittag, Mittag 12:20, Nachmittag 15:20) sind fest eingebaut<br>
           • 🗺️ „Route zeigen“: die ganze Tour als Strecke auf der Karte, mit km und Fahrzeit<br>
           • 🧭 „Tour-Navi“: Google Maps navigiert die komplette Tour mit allen Halten<br>
@@ -309,6 +343,7 @@
     <button data-view="karte"><span class="ic">🗺️</span>Karte</button>
     <button data-view="auftraege"><span class="ic">📋</span>Aufträge</button>
     <button data-view="fahrtenbuch"><span class="ic">📖</span>Fahrtenbuch</button>
+    <button data-view="telefon"><span class="ic">📞</span>Telefon</button>
     <button data-view="mehr"><span class="ic">⚙️</span>Mehr</button>
   </nav>
 </div>
@@ -504,7 +539,7 @@ async function tourRouteZeigen(t){
 }
 
 /* Neu in 1.2: ganze Tour mit allen Halten an Google Maps übergeben */
-function tourNavi(t){
+function tourNaviAlle(t){
   if (!t.stops || t.stops.length === 0){ banner("Diese Tour hat noch keine Haltestellen."); return; }
   const ziel = t.stops[t.stops.length - 1];
   let url = "https://www.google.com/maps/dir/?api=1&destination=" + ziel.lat + "," + ziel.lng + "&travelmode=driving";
@@ -620,6 +655,7 @@ function gpsPunkt(pos){
   $("stKm").textContent = aktiveFahrt.km.toFixed(1);
   $("stTempo").textContent = speed != null ? Math.round(speed * 3.6) : "–";
   zonenPruefen(lat, lng);
+  tourLaufGps(lat, lng); // Neu in 1.4: Ankunft am nächsten Halt erkennen
 }
 
 /* Alle 60 Sekunden einen Standort mit Uhrzeit und km-Stand festhalten */
@@ -805,9 +841,10 @@ function zeichneTouren(){
       "<div class='sub'>" + t.stops.length + " Haltestellen · " + fertig + " erledigt</div></div>" +
       "<button class='btn hell klein' data-a='stop'>＋ Halt</button>" +
       "<button class='btn rot klein' data-a='del'>🗑</button></div>" +
-      "<div style='display:flex; gap:8px; margin-top:10px;'>" +
+      "<div style='display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;'>" +
+      "<button class='btn gelb klein' data-a='start' style='flex:1 1 100%;'>▶ Tour starten – Halt für Halt</button>" +
       "<button class='btn klein' data-a='route' style='flex:1;'>🗺️ Route zeigen</button>" +
-      "<button class='btn gelb klein' data-a='navi' style='flex:1;'>🧭 Tour-Navi</button></div>" +
+      "<button class='btn hell klein' data-a='navi' style='flex:1;'>🧭 Alle Halte in Maps</button></div>" +
       "<div class='stops'></div>" +
       (t.stops.some(s => s.done) ? "<button class='btn hell klein' data-a='reset' style='margin-top:10px;'>↺ Häkchen zurücksetzen</button>" : "");
     const stopsDiv = div.querySelector(".stops");
@@ -838,8 +875,9 @@ function zeichneTouren(){
         zeige("auftraege");
       });
     };
+    div.querySelector("[data-a='start']").onclick = () => tourNaviStarten(t);
     div.querySelector("[data-a='route']").onclick = () => tourRouteZeigen(t);
-    div.querySelector("[data-a='navi']").onclick = () => tourNavi(t);
+    div.querySelector("[data-a='navi']").onclick = () => tourNaviAlle(t);
     div.querySelector("[data-a='del']").onclick = () => {
       if (!confirm("Tour '" + t.name + "' komplett löschen?")) return;
       touren = touren.filter(x => x.id !== t.id); speichereTouren();
@@ -968,6 +1006,162 @@ $("csvBtn").addEventListener("click", () => {
   a.download = "fahrtenbuch_" + new Date().toISOString().slice(0, 10) + ".csv";
   a.click();
   URL.revokeObjectURL(a.href);
+});
+
+/* ================= Tour-Navi Halt für Halt (Neu in 1.4) ================= */
+let tourLauf = store.get("sf_tourlauf", null); // {tourId}
+function naviZuStop(s){
+  window.open("https://www.google.com/maps/dir/?api=1&destination=" + s.lat + "," + s.lng + "&travelmode=driving", "_blank", "noopener,noreferrer");
+}
+function naechsterOffenerStop(t){ return t.stops.find(s => !s.done); }
+function tourNaviStarten(t){
+  if (!t.stops.length){ banner("Diese Tour hat noch keine Haltestellen."); return; }
+  if (t.stops.every(s => s.done) ||
+      (t.stops.some(s => s.done) && confirm("Häkchen zurücksetzen und die Tour von vorne beginnen?"))){
+    t.stops.forEach(s => s.done = false);
+  }
+  tourLauf = { tourId: t.id };
+  store.set("sf_tourlauf", tourLauf);
+  speichereTouren();
+  zeichneTourNavi();
+  const s = naechsterOffenerStop(t);
+  banner("🧭 Tour gestartet – Halt 1: " + s.name);
+  naviZuStop(s);
+}
+function tourNaviErledigt(){
+  if (!tourLauf) return;
+  const t = touren.find(x => x.id === tourLauf.tourId);
+  if (!t){ tourNaviBeenden(true); return; }
+  const s = naechsterOffenerStop(t);
+  if (s){ s.done = true; speichereTouren(); }
+  const n = naechsterOffenerStop(t);
+  if (n){
+    banner("✅ Erledigt! Weiter zu Halt " + (t.stops.indexOf(n) + 1) + ": " + n.name);
+    naviZuStop(n);
+  } else {
+    melden("🎉 Tour „" + t.name + "“ beendet – alle Halte erledigt!");
+    tourNaviBeenden(true);
+  }
+  zeichneTourNavi();
+}
+function tourNaviBeenden(leise){
+  tourLauf = null; store.del("sf_tourlauf");
+  zeichneTourNavi();
+  if (!leise) banner("Tour-Navi beendet.");
+}
+function zeichneTourNavi(){
+  const ziel = $("tourNaviCard");
+  if (!tourLauf){ ziel.classList.add("hidden"); return; }
+  const t = touren.find(x => x.id === tourLauf.tourId);
+  const s = t ? naechsterOffenerStop(t) : null;
+  if (!t || !s){ tourNaviBeenden(true); return; }
+  const nr = t.stops.indexOf(s) + 1;
+  ziel.classList.remove("hidden");
+  ziel.innerHTML =
+    "<h2>🧭 Tour läuft: " + t.name + "</h2>" +
+    "<div style='font-size:17px; margin-bottom:4px;'>Nächster Halt <b>" + nr + " von " + t.stops.length + "</b>:</div>" +
+    "<div style='font-size:19px; font-weight:800; margin-bottom:10px;'>🚏 " + s.name + "</div>" +
+    "<button class='btn gelb voll' id='tnErledigt' style='margin-bottom:8px;'>✅ Halt erledigt → nächster Halt</button>" +
+    "<div style='display:flex; gap:8px;'>" +
+    "<button class='btn hell klein' id='tnNavi' style='flex:1;'>🧭 Navi zu diesem Halt</button>" +
+    "<button class='btn rot klein' id='tnStop'>⏹ Beenden</button></div>";
+  $("tnErledigt").onclick = tourNaviErledigt;
+  $("tnNavi").onclick = () => naviZuStop(s);
+  $("tnStop").onclick = () => { if (confirm("Tour-Navi wirklich beenden?")) tourNaviBeenden(); };
+}
+/* GPS-Ankunft: wenn du näher als 60 m am nächsten Halt bist, wird er automatisch abgehakt */
+let letzteAnkunft = 0;
+function tourLaufGps(lat, lng){
+  if (!tourLauf || Date.now() - letzteAnkunft < 20000) return;
+  const t = touren.find(x => x.id === tourLauf.tourId);
+  if (!t) return;
+  const s = naechsterOffenerStop(t);
+  if (!s) return;
+  if (haversine([lat, lng], [s.lat, s.lng]) < 60){
+    letzteAnkunft = Date.now();
+    s.done = true; speichereTouren();
+    const n = naechsterOffenerStop(t);
+    if (n) melden("🚏 Halt erreicht: " + s.name + " ✅ Nächster: " + n.name);
+    else { melden("🎉 Tour „" + t.name + "“ beendet – alle Halte erledigt!"); tourNaviBeenden(true); }
+    zeichneTourNavi();
+  }
+}
+
+/* ================= Telefon-Liste (Neu in 1.4) ================= */
+let anrufe = store.get("sf_anrufe", []);
+let telLaufend = store.get("sf_tellauf", null), telTimerInt = null;
+function telAnzeigeStart(){
+  $("telLaufend").classList.remove("hidden");
+  $("telStartKnoepfe").classList.add("hidden");
+  clearInterval(telTimerInt);
+  telTimerInt = setInterval(() => {
+    if (!telLaufend) return;
+    const s = Math.floor((Date.now() - telLaufend.start) / 1000);
+    $("telTimer").textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }, 500);
+}
+function telStart(richtung){
+  const nr = $("telNummer").value.trim();
+  if (!nr){ banner("Bitte zuerst die Telefonnummer eintippen."); return; }
+  telLaufend = { start: Date.now(), nummer: nr, richtung };
+  store.set("sf_tellauf", telLaufend);
+  telAnzeigeStart();
+  if (richtung === "Ausgehend"){
+    try{ window.location.href = "tel:" + nr.replace(/[^+\d]/g, ""); }catch(e){}
+  }
+  banner((richtung === "Eingehend" ? "📥" : "📤") + " Anruf läuft – Gesprächszeit wird gestoppt");
+}
+function telEnde(){
+  if (!telLaufend) return;
+  clearInterval(telTimerInt); telTimerInt = null;
+  anrufe.unshift({ t: telLaufend.start, nummer: telLaufend.nummer, richtung: telLaufend.richtung, dauer: Date.now() - telLaufend.start });
+  store.set("sf_anrufe", anrufe);
+  telLaufend = null; store.del("sf_tellauf");
+  $("telLaufend").classList.add("hidden");
+  $("telStartKnoepfe").classList.remove("hidden");
+  $("telNummer").value = "";
+  zeichneAnrufe();
+  banner("📞 Anruf gespeichert ✅");
+}
+function fmtGespraech(ms){
+  const s = Math.floor(ms / 1000);
+  return Math.floor(s / 60) + " min " + (s % 60) + " s";
+}
+function zeichneAnrufe(){
+  const ziel = $("telListe");
+  if (anrufe.length === 0){ ziel.innerHTML = "<div class='leer'>Noch keine Anrufe gespeichert.</div>"; return; }
+  ziel.innerHTML = "";
+  anrufe.forEach(a => {
+    const div = document.createElement("div");
+    div.className = "zeile";
+    div.innerHTML =
+      "<div class='kopf'><span style='font-size:18px;'>" + (a.richtung === "Eingehend" ? "📥" : "📤") + "</span>" +
+      "<div style='flex:1;'><div class='titel'>" + a.nummer + "</div>" +
+      "<div class='sub'>" + fmtDatum(a.t) + " · " + fmtZeit(a.t) + " Uhr · " + a.richtung + " · " + fmtGespraech(a.dauer) + "</div></div>" +
+      "<button class='btn rot klein' data-a='del'>🗑</button></div>";
+    div.querySelector("[data-a='del']").onclick = () => {
+      if (!confirm("Diesen Anruf aus der Liste löschen?")) return;
+      anrufe = anrufe.filter(x => x !== a);
+      store.set("sf_anrufe", anrufe); zeichneAnrufe();
+    };
+    ziel.appendChild(div);
+  });
+}
+$("telEinBtn").addEventListener("click", () => telStart("Eingehend"));
+$("telAusBtn").addEventListener("click", () => telStart("Ausgehend"));
+$("telEndeBtn").addEventListener("click", telEnde);
+$("telCsvBtn").addEventListener("click", () => {
+  if (anrufe.length === 0){ banner("Noch keine Anrufe vorhanden."); return; }
+  const zeilen = ["Datum;Uhrzeit;Nummer;Richtung;Gespraechszeit"];
+  anrufe.forEach(a => zeilen.push([
+    new Date(a.t).toLocaleDateString("de-DE"), fmtZeit(a.t), a.nummer, a.richtung, fmtGespraech(a.dauer)
+  ].map(x => '"' + String(x).replace(/"/g, '""') + '"').join(";")));
+  const blob = new Blob(["﻿" + zeilen.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a2 = document.createElement("a");
+  a2.href = URL.createObjectURL(blob);
+  a2.download = "telefonliste_" + new Date().toISOString().slice(0, 10) + ".csv";
+  a2.click();
+  URL.revokeObjectURL(a2.href);
 });
 
 /* ================= Kilometer-Blatt (Neu in 1.2) ================= */
@@ -1108,6 +1302,8 @@ function appStart(){
   v12TourenAnlegen(); // Neu in 1.2: feste Touren beim ersten Start anlegen
   fuelleTourWahl();
   zeichneTouren(); zeichneZonenListe(); zeichneFahrtenbuch(); zeichneKmBlatt();
+  zeichneTourNavi(); zeichneAnrufe();
+  if (telLaufend){ telAnzeigeStart(); } // laufenden Anruf nach Neustart weiterzählen
   uhrTick(); uhrTimer = setInterval(uhrTick, 1000);
   if (aktiveFahrt){ // App wurde während einer Fahrt neu geladen → weiter aufzeichnen
     if (!aktiveFahrt.protokoll) aktiveFahrt.protokoll = []; // Fahrt aus Version 1.0 übernehmen
