@@ -1,6 +1,6 @@
 /* Service Worker: macht die App-Oberfläche offline nutzbar (Kartenkacheln brauchen weiterhin Internet).
    Strategie: erst Netzwerk (damit Updates sofort ankommen), bei Offline-Betrieb aus dem Cache. */
-const CACHE = "schulbus-fahrer-v7"; // Version 2.0: Cloud-Konto (Firebase)
+const CACHE = "schulbus-fahrer-v8"; // Version 2.1: Tour-Editor, Anwesenheit, Excel
 const DATEIEN = [
   "./",
   "./index.html",
@@ -11,6 +11,7 @@ const DATEIEN = [
   "./lib/firebase-app-compat.js",
   "./lib/firebase-auth-compat.js",
   "./lib/firebase-firestore-compat.js",
+  "./lib/xlsx.full.min.js",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
 ];

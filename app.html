@@ -295,7 +295,20 @@
         </div>
         <p style="font-size:12px; color:var(--text2); margin-top:8px;">
           Jeder ⏹&nbsp;Stop trägt die gefahrenen Kilometer hier ein (Vormittag / Mittag / Nachmittag).
+          Gespeichert wird jetzt als echte Excel-Datei (.xlsx).
           Am Monatsende: erst 💾 speichern, dann auf deinen Wunsch 🗑 löschen.
+        </p>
+      </div>
+      <div class="card">
+        <h2>🧒 Anwesenheit der Kinder</h2>
+        <div id="anwListe"></div>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+          <button class="btn hell klein" id="anwCsvBtn">⬇ Als CSV exportieren</button>
+          <button class="btn rot klein" id="anwLoeschenBtn">🗑 Alles löschen</button>
+        </div>
+        <p style="font-size:12px; color:var(--text2); margin-top:8px;">
+          Kinder trägst du bei den Haltestellen ein (Aufträge → ✏️ am Halt → 🧒 Kinder).
+          Beim Abhaken eines Halts fragt die App automatisch, wer eingestiegen ist.
         </p>
       </div>
       <div id="tripListe"></div>
@@ -324,8 +337,12 @@
       <div class="card">
         <h2>Info</h2>
         <p style="font-size:14px; color:var(--text2);">
-          <b>Version 2.0 – mit Cloud-Konto</b><br><br>
-          Neu in 2.0:<br>
+          <b>Version 2.1</b><br><br>
+          Neu in 2.1:<br>
+          • ✏️ Tour-Editor: Halte mit ▲▼ umsortieren, bearbeiten (Name, geplante Uhrzeit, Position), Touren umbenennen und kopieren – keine störenden Eingabefenster mehr<br>
+          • 🧒 Schüler-Anwesenheit: Kinder pro Halt eintragen; beim Abhaken eines Halts fragt die App, wer eingestiegen ist – mit Fehlliste und Export im Fahrtenbuch<br>
+          • 📄 Kilometer-Blatt wird jetzt als echte Excel-Datei (.xlsx) gespeichert<br><br>
+          Aus Version 2.0:<br>
           • Anmeldung mit E-Mail + Passwort – nur dein Konto hat Zugriff<br>
           • ☁️ Handy und PC zeigen dieselben Daten (Fahrten, Touren, Kilometer-Blatt, Anrufe)<br>
           • Funktioniert weiter offline und gleicht sich später von selbst ab<br>
@@ -367,6 +384,7 @@
 <script src="lib/firebase-app-compat.js"></script>
 <script src="lib/firebase-auth-compat.js"></script>
 <script src="lib/firebase-firestore-compat.js"></script>
+<script src="lib/xlsx.full.min.js"></script>
 <script>
 "use strict";
 /* ================= Speicher ================= */
@@ -381,8 +399,10 @@ let touren  = store.get("sf_touren", []);
 let zonen   = store.get("sf_zonen", []);
 let aktiveFahrt = store.get("sf_aktiv", null);
 let kmBlatt = store.get("sf_kmblatt", []); // Neu in 1.2: Kilometer-Blatt für die Köhler App
+let anwesenheit = store.get("sf_anwesenheit", []); // Neu in 2.1: Anwesenheit der Kinder
 
 const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const fmtZeit = t => new Date(t).toLocaleTimeString("de-DE", {hour:"2-digit", minute:"2-digit"});
 const fmtDatum = t => new Date(t).toLocaleDateString("de-DE", {weekday:"short", day:"2-digit", month:"2-digit", year:"numeric"});
@@ -433,7 +453,7 @@ const auth = firebase.auth();
 const db = firebase.firestore();
 auth.languageCode = "de";
 
-const CLOUD_KEYS = ["sf_profil", "sf_touren", "sf_zonen", "sf_kmblatt", "sf_anrufe"]; // je ein Cloud-Dokument
+const CLOUD_KEYS = ["sf_profil", "sf_touren", "sf_zonen", "sf_kmblatt", "sf_anrufe", "sf_anwesenheit"]; // je ein Cloud-Dokument
 let cloudBereit = false, cloudBasis = null;
 let stempel = store.get("sf_stempel", {});          // wann jeder Schlüssel zuletzt HIER geändert wurde
 let cloudTripStand = {};                            // Fahrt-Id → JSON, wie sie zuletzt in der Cloud stand
@@ -475,11 +495,13 @@ function uebernehmen(k, wert, t){
   if (k === "sf_zonen")  zonen = wert;
   if (k === "sf_kmblatt") kmBlatt = wert;
   if (k === "sf_anrufe") anrufe = wert;
+  if (k === "sf_anwesenheit") anwesenheit = wert;
 }
 function neuZeichnen(){
   try{
     fuelleTourWahl(); zeichneTouren(); zeichneStops(); zeichneZonenListe(); zeichneZonen();
     zeichneFahrtenbuch(); zeichneKmBlatt(); zeichneAnrufe(); zeichneTourNavi(); statistikAnzeigen();
+    zeichneAnwesenheit();
   }catch(e){}
 }
 async function cloudStart(user){
@@ -912,6 +934,27 @@ function modal(html){
 function modalZu(){ $("modalWrap").classList.add("hidden"); }
 $("modalWrap").addEventListener("click", e => { if (e.target === $("modalWrap")) modalZu(); });
 
+/* Kleines Formular-Fenster (ersetzt die alten prompt()-Abfragen).
+   felder: [{id, label, wert, ph, typ}], weiter(werte) bekommt die Eingaben. */
+function formModal(titel, felder, weiter){
+  modal(
+    "<h3>" + titel + "</h3>" +
+    felder.map(f =>
+      "<div class='feld'><label>" + f.label + "</label>" +
+      "<input id='fm_" + f.id + "' type='" + (f.typ || "text") + "' value='" + esc(f.wert || "") + "' placeholder='" + esc(f.ph || "") + "'></div>"
+    ).join("") +
+    "<div class='knoepfe'><button class='btn hell' id='fmAbbruch'>Abbrechen</button><button class='btn gelb' id='fmOk'>Speichern</button></div>"
+  );
+  $("fmAbbruch").onclick = modalZu;
+  $("fmOk").onclick = () => {
+    const werte = {};
+    felder.forEach(f => werte[f.id] = $("fm_" + f.id).value.trim());
+    modalZu();
+    weiter(werte);
+  };
+  setTimeout(() => { const e = $("fm_" + felder[0].id); if (e) e.focus(); }, 60);
+}
+
 /* Ort wählen: gemeinsamer Dialog für Stops und Zonen.
    weiter([lat,lng]) wird aufgerufen, sobald eine Position feststeht. */
 function ortWaehlen(titel, weiter){
@@ -990,10 +1033,11 @@ function v12TourenAnlegen(){
 }
 
 $("neueTourBtn").addEventListener("click", () => {
-  const name = prompt("Name der Tour (z. B. 'Morgentour Grundschule'):");
-  if (!name || !name.trim()) return;
-  touren.push({ id: uid(), name: name.trim(), stops: [] });
-  speichereTouren();
+  formModal("📋 Neue Tour", [{ id: "name", label: "Name der Tour", ph: "z. B. Morgentour Grundschule" }], w => {
+    if (!w.name) return;
+    touren.push({ id: uid(), name: w.name, stops: [] });
+    speichereTouren();
+  });
 });
 
 function zeichneTouren(){
@@ -1006,47 +1050,84 @@ function zeichneTouren(){
     const fertig = t.stops.filter(s => s.done).length;
     div.innerHTML =
       "<div class='kopf'><span style='font-size:20px;'>📋</span><div style='flex:1;'>" +
-      "<div class='titel'>" + t.name + "</div>" +
-      "<div class='sub'>" + t.stops.length + " Haltestellen · " + fertig + " erledigt</div></div>" +
-      "<button class='btn hell klein' data-a='stop'>＋ Halt</button>" +
-      "<button class='btn rot klein' data-a='del'>🗑</button></div>" +
+      "<div class='titel'>" + esc(t.name) + "</div>" +
+      "<div class='sub'>" + t.stops.length + " Haltestellen · " + fertig + " erledigt</div></div></div>" +
       "<div style='display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;'>" +
       "<button class='btn gelb klein' data-a='start' style='flex:1 1 100%;'>▶ Tour starten – Halt für Halt</button>" +
-      "<button class='btn klein' data-a='route' style='flex:1;'>🗺️ Route zeigen</button>" +
-      "<button class='btn hell klein' data-a='navi' style='flex:1;'>🧭 Alle Halte in Maps</button></div>" +
+      "<button class='btn klein' data-a='route' style='flex:1;'>🗺️ Route</button>" +
+      "<button class='btn hell klein' data-a='navi' style='flex:1;'>🧭 Maps</button>" +
+      "<button class='btn hell klein' data-a='stop' style='flex:1;'>＋ Halt</button></div>" +
       "<div class='stops'></div>" +
-      (t.stops.some(s => s.done) ? "<button class='btn hell klein' data-a='reset' style='margin-top:10px;'>↺ Häkchen zurücksetzen</button>" : "");
+      "<div style='display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;'>" +
+      "<button class='btn hell klein' data-a='umbenennen'>✏️ Umbenennen</button>" +
+      "<button class='btn hell klein' data-a='kopieren'>⧉ Kopieren</button>" +
+      (t.stops.some(s => s.done) ? "<button class='btn hell klein' data-a='reset'>↺ Häkchen</button>" : "") +
+      "<button class='btn rot klein' data-a='del'>🗑 Tour löschen</button></div>";
     const stopsDiv = div.querySelector(".stops");
-    t.stops.forEach(s => {
+    t.stops.forEach((s, i) => {
       const z = document.createElement("div");
       z.className = "stopZeile";
       z.innerHTML =
         "<input type='checkbox' " + (s.done ? "checked" : "") + ">" +
-        "<span class='sname " + (s.done ? "done" : "") + "'>🚏 " + s.name + "</span>" +
-        "<button class='btn klein' title='Navigation starten'>🧭 Navi</button>" +
-        "<button class='btn hell klein' title='Halt löschen'>🗑</button>";
-      z.querySelector("input").onchange = ev => { s.done = ev.target.checked; speichereTouren(); };
-      z.querySelector("button[title='Navigation starten']").onclick = () =>
-        window.open("https://www.google.com/maps/dir/?api=1&destination=" + s.lat + "," + s.lng + "&travelmode=driving", "_blank", "noopener,noreferrer");
-      z.querySelector("button[title='Halt löschen']").onclick = () => {
-        if (!confirm("Haltestelle '" + s.name + "' löschen?")) return;
-        t.stops = t.stops.filter(x => x.id !== s.id); speichereTouren();
+        "<span class='sname " + (s.done ? "done" : "") + "'>🚏 " + esc(s.name) +
+        (s.zeit ? " <span style='color:var(--text2); font-size:13px; white-space:nowrap;'>🕐 " + esc(s.zeit) + "</span>" : "") +
+        ((s.kinder && s.kinder.length) ? " <span style='color:var(--text2); font-size:13px;'>🧒 " + s.kinder.length + "</span>" : "") +
+        "</span>" +
+        "<button class='btn hell klein' data-b='hoch' title='Nach oben'>▲</button>" +
+        "<button class='btn hell klein' data-b='runter' title='Nach unten'>▼</button>" +
+        "<button class='btn klein' data-b='navi' title='Navi zu diesem Halt'>🧭</button>" +
+        "<button class='btn hell klein' data-b='edit' title='Halt bearbeiten'>✏️</button>";
+      z.querySelector("input").onchange = ev => {
+        s.done = ev.target.checked;
+        speichereTouren();
+        if (s.done && s.kinder && s.kinder.length) anwesenheitAbfragen(t, s);
       };
+      z.querySelector("[data-b='hoch']").onclick = () => {
+        if (i <= 0) return;
+        [t.stops[i-1], t.stops[i]] = [t.stops[i], t.stops[i-1]];
+        speichereTouren();
+      };
+      z.querySelector("[data-b='runter']").onclick = () => {
+        if (i >= t.stops.length - 1) return;
+        [t.stops[i+1], t.stops[i]] = [t.stops[i], t.stops[i+1]];
+        speichereTouren();
+      };
+      z.querySelector("[data-b='navi']").onclick = () => naviZuStop(s);
+      z.querySelector("[data-b='edit']").onclick = () => stopBearbeiten(t, s);
       stopsDiv.appendChild(z);
     });
     div.querySelector("[data-a='stop']").onclick = () => {
-      const name = prompt("Name der Haltestelle (z. B. 'Hauptstraße / Kirche'):");
-      if (!name || !name.trim()) return;
-      ortWaehlen("Wo liegt „" + name.trim() + "“?", ll => {
-        t.stops.push({ id: uid(), name: name.trim(), lat: ll[0], lng: ll[1], done: false });
-        speichereTouren();
-        banner("Haltestelle gespeichert ✅");
-        zeige("auftraege");
+      formModal("🚏 Neue Haltestelle", [
+        { id: "name", label: "Name der Haltestelle", ph: "z. B. Hauptstraße / Kirche" },
+        { id: "zeit", label: "Geplante Uhrzeit (kann leer bleiben)", typ: "time" }
+      ], w => {
+        if (!w.name) return;
+        ortWaehlen("Wo liegt „" + w.name + "“?", ll => {
+          t.stops.push({ id: uid(), name: w.name, zeit: w.zeit || "", lat: ll[0], lng: ll[1], done: false, kinder: [] });
+          speichereTouren();
+          banner("Haltestelle gespeichert ✅");
+          zeige("auftraege");
+        });
       });
     };
     div.querySelector("[data-a='start']").onclick = () => tourNaviStarten(t);
     div.querySelector("[data-a='route']").onclick = () => tourRouteZeigen(t);
     div.querySelector("[data-a='navi']").onclick = () => tourNaviAlle(t);
+    div.querySelector("[data-a='umbenennen']").onclick = () => {
+      formModal("✏️ Tour umbenennen", [{ id: "name", label: "Name der Tour", wert: t.name }], w => {
+        if (!w.name) return;
+        t.name = w.name; speichereTouren();
+      });
+    };
+    div.querySelector("[data-a='kopieren']").onclick = () => {
+      const kopie = JSON.parse(JSON.stringify(t));
+      kopie.id = uid();
+      kopie.name = t.name + " (Kopie)";
+      kopie.stops.forEach(s => { s.id = uid(); s.done = false; });
+      touren.push(kopie);
+      speichereTouren();
+      banner("Tour kopiert – du kannst sie jetzt umbenennen und anpassen.");
+    };
     div.querySelector("[data-a='del']").onclick = () => {
       if (!confirm("Tour '" + t.name + "' komplett löschen?")) return;
       touren = touren.filter(x => x.id !== t.id); speichereTouren();
@@ -1056,6 +1137,141 @@ function zeichneTouren(){
     ziel.appendChild(div);
   });
 }
+
+/* Halt bearbeiten: Name, geplante Uhrzeit, Position, Kinder, Löschen */
+function stopBearbeiten(t, s){
+  modal(
+    "<h3>🚏 Halt bearbeiten</h3>" +
+    "<div class='feld'><label>Name</label><input id='sbName' value='" + esc(s.name) + "'></div>" +
+    "<div class='feld'><label>Geplante Uhrzeit (kann leer bleiben)</label><input id='sbZeit' type='time' value='" + esc(s.zeit || "") + "'></div>" +
+    "<div style='display:flex; gap:8px; margin-bottom:6px;'>" +
+    "<button class='btn hell klein' id='sbOrt' style='flex:1;'>📍 Position neu setzen</button>" +
+    "<button class='btn hell klein' id='sbKinder' style='flex:1;'>🧒 Kinder (" + ((s.kinder || []).length) + ")</button></div>" +
+    "<div class='knoepfe'><button class='btn rot' id='sbDel'>🗑</button><button class='btn hell' id='sbAbbruch'>Abbrechen</button><button class='btn gelb' id='sbOk'>Speichern</button></div>"
+  );
+  const uebernehmenFelder = () => {
+    const n = $("sbName").value.trim();
+    if (n) s.name = n;
+    s.zeit = $("sbZeit").value || "";
+  };
+  $("sbAbbruch").onclick = modalZu;
+  $("sbOk").onclick = () => { uebernehmenFelder(); modalZu(); speichereTouren(); };
+  $("sbOrt").onclick = () => {
+    uebernehmenFelder(); modalZu();
+    ortWaehlen("Neue Position für „" + s.name + "“", ll => {
+      s.lat = ll[0]; s.lng = ll[1];
+      speichereTouren();
+      banner("Position aktualisiert ✅");
+      zeige("auftraege");
+    });
+  };
+  $("sbKinder").onclick = () => { uebernehmenFelder(); kinderVerwalten(t, s); };
+  $("sbDel").onclick = () => {
+    if (!confirm("Haltestelle '" + s.name + "' löschen?")) return;
+    t.stops = t.stops.filter(x => x.id !== s.id);
+    modalZu(); speichereTouren();
+  };
+}
+
+/* Kinder eines Halts verwalten (Neu in 2.1) */
+function kinderVerwalten(t, s){
+  s.kinder = s.kinder || [];
+  const liste = () => s.kinder.map((k, i) =>
+    "<div style='display:flex; align-items:center; gap:10px; padding:7px 0; border-top:1px solid var(--rand);'>" +
+    "<span style='flex:1;'>🧒 " + esc(k) + "</span>" +
+    "<button class='btn hell klein kiDel' data-i='" + i + "'>🗑</button></div>").join("") ||
+    "<div class='leer'>Noch keine Kinder eingetragen.</div>";
+  modal(
+    "<h3>🧒 Kinder am Halt „" + esc(s.name) + "“</h3>" +
+    "<p style='font-size:13px; color:var(--text2); margin-bottom:10px;'>Datenschutz: bitte nur Vorname + erster Buchstabe des Nachnamens, z. B. <b>Lena M.</b></p>" +
+    "<div id='kiListe'>" + liste() + "</div>" +
+    "<div style='display:flex; gap:8px; margin-top:10px;'>" +
+    "<input id='kiNeu' placeholder='z. B. Lena M.' style='flex:1; padding:12px; border:1px solid var(--rand); border-radius:10px; font-size:16px;'>" +
+    "<button class='btn gelb klein' id='kiAdd'>＋</button></div>" +
+    "<div class='knoepfe'><button class='btn' id='kiFertig'>Fertig</button></div>"
+  );
+  const haken = () => {
+    document.querySelectorAll(".kiDel").forEach(b => b.onclick = () => {
+      s.kinder.splice(+b.dataset.i, 1);
+      $("kiListe").innerHTML = liste(); haken();
+    });
+  };
+  haken();
+  $("kiAdd").onclick = () => {
+    const n = $("kiNeu").value.trim();
+    if (!n) return;
+    s.kinder.push(n);
+    $("kiNeu").value = "";
+    $("kiListe").innerHTML = liste(); haken();
+    $("kiNeu").focus();
+  };
+  $("kiFertig").onclick = () => { modalZu(); speichereTouren(); };
+}
+
+/* ================= Anwesenheit (Neu in 2.1) ================= */
+function anwesenheitAbfragen(tour, s){
+  const status = s.kinder.map(() => true);
+  modal(
+    "<h3>🧒 Wer ist eingestiegen?</h3>" +
+    "<div style='color:var(--text2); font-size:14px; margin-bottom:10px;'>🚏 " + esc(s.name) + " · " + esc(tour.name) + "<br>Antippen, wenn ein Kind fehlt.</div>" +
+    s.kinder.map((k, i) =>
+      "<div style='display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--rand);'>" +
+      "<span style='flex:1; font-size:16px;'>" + esc(k) + "</span>" +
+      "<button class='btn klein anwKnopf' data-i='" + i + "' style='min-width:110px;'>✅ da</button></div>").join("") +
+    "<div class='knoepfe'><button class='btn hell' id='anwSpaeter'>Überspringen</button><button class='btn gelb' id='anwOk'>Speichern</button></div>"
+  );
+  document.querySelectorAll(".anwKnopf").forEach(b => b.onclick = () => {
+    const i = +b.dataset.i;
+    status[i] = !status[i];
+    b.textContent = status[i] ? "✅ da" : "❌ fehlt";
+    b.style.background = status[i] ? "" : "var(--rot)";
+  });
+  $("anwSpaeter").onclick = modalZu;
+  $("anwOk").onclick = () => {
+    const nun = Date.now();
+    s.kinder.forEach((k, i) => anwesenheit.unshift({ t: nun, tour: tour.name, halt: s.name, kind: k, da: status[i] }));
+    if (anwesenheit.length > 4000) anwesenheit = anwesenheit.slice(0, 4000);
+    store.set("sf_anwesenheit", anwesenheit);
+    zeichneAnwesenheit();
+    modalZu();
+    const gefehlt = status.filter(x => !x).length;
+    banner(gefehlt ? "Gespeichert – " + gefehlt + " Kind(er) fehlen heute." : "Gespeichert – alle da ✅");
+  };
+}
+function zeichneAnwesenheit(){
+  const ziel = $("anwListe");
+  if (!anwesenheit.length){ ziel.innerHTML = "<div class='leer'>Noch keine Einträge.</div>"; return; }
+  const gefehlt = anwesenheit.filter(a => !a.da);
+  let html = "<div style='font-size:14px; margin-bottom:6px;'>" + anwesenheit.length + " Einträge · <b>" + gefehlt.length + "× gefehlt</b></div>";
+  if (!gefehlt.length) html += "<div class='leer'>Bisher hat kein Kind gefehlt 🎉</div>";
+  else html += gefehlt.slice(0, 60).map(a =>
+    "<div class='ereignis'><b>" + fmtDatum(a.t) + " " + fmtZeit(a.t) + "</b> – ❌ " + esc(a.kind) +
+    " <span style='color:var(--text2);'>(" + esc(a.halt) + ", " + esc(a.tour) + ")</span></div>").join("");
+  ziel.innerHTML = html;
+}
+$("anwCsvBtn").addEventListener("click", () => {
+  if (!anwesenheit.length){ banner("Noch keine Anwesenheits-Einträge."); return; }
+  const zeilen = [["Datum", "Uhrzeit", "Tour", "Haltestelle", "Kind", "Status"].join(";")];
+  anwesenheit.forEach(a => {
+    zeilen.push([
+      new Date(a.t).toLocaleDateString("de-DE"), fmtZeit(a.t), a.tour, a.halt, a.kind, a.da ? "da" : "FEHLT"
+    ].map(x => '"' + String(x).replace(/"/g, '""') + '"').join(";"));
+  });
+  const blob = new Blob(["﻿" + zeilen.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "anwesenheit_" + new Date().toISOString().slice(0, 10) + ".csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+$("anwLoeschenBtn").addEventListener("click", () => {
+  if (!anwesenheit.length){ banner("Die Liste ist schon leer."); return; }
+  if (!confirm("Alle Anwesenheits-Einträge löschen?\n\nVorher exportieren nicht vergessen!")) return;
+  anwesenheit = [];
+  store.set("sf_anwesenheit", anwesenheit);
+  zeichneAnwesenheit();
+  banner("Anwesenheits-Liste geleert 🗑");
+});
 function fuelleTourWahl(){
   const sel = $("tourWahl"), alt = sel.value;
   sel.innerHTML = "<option value=''>Ohne Tour</option>" +
@@ -1068,16 +1284,20 @@ $("tourWahl").addEventListener("change", zeichneStops);
 function speichereZonen(){ store.set("sf_zonen", zonen); zeichneZonenListe(); zeichneZonen(); }
 
 $("neueZoneBtn").addEventListener("click", () => {
-  const name = prompt("Name der Zone (z. B. 'Schule', 'Depot'):");
-  if (!name || !name.trim()) return;
-  let radius = parseInt(prompt("Radius in Metern (z. B. 200):", "200"), 10);
-  if (!radius || radius < 20) radius = 200;
-  ortWaehlen("Wo liegt die Zone „" + name.trim() + "“?", ll => {
-    zonen.push({ id: uid(), name: name.trim(), radius, lat: ll[0], lng: ll[1] });
-    if (aktiveFahrt) zonenStatus[zonen[zonen.length-1].id] = false;
-    speichereZonen();
-    banner("Zone gespeichert ✅");
-    zeige("mehr");
+  formModal("🚧 Neue Zone", [
+    { id: "name", label: "Name der Zone", ph: "z. B. Schule, Depot" },
+    { id: "radius", label: "Radius in Metern", wert: "200", typ: "number" }
+  ], w => {
+    if (!w.name) return;
+    let radius = parseInt(w.radius, 10);
+    if (!radius || radius < 20) radius = 200;
+    ortWaehlen("Wo liegt die Zone „" + w.name + "“?", ll => {
+      zonen.push({ id: uid(), name: w.name, radius, lat: ll[0], lng: ll[1] });
+      if (aktiveFahrt) zonenStatus[zonen[zonen.length-1].id] = false;
+      speichereZonen();
+      banner("Zone gespeichert ✅");
+      zeige("mehr");
+    });
   });
 });
 function zeichneZonenListe(){
@@ -1212,6 +1432,7 @@ function tourNaviErledigt(){
     tourNaviBeenden(true);
   }
   zeichneTourNavi();
+  if (s && s.kinder && s.kinder.length) anwesenheitAbfragen(t, s); // Neu in 2.1
 }
 function tourNaviBeenden(leise){
   tourLauf = null; store.del("sf_tourlauf");
@@ -1253,6 +1474,7 @@ function tourLaufGps(lat, lng){
     if (n) melden("🚏 Halt erreicht: " + s.name + " ✅ Nächster: " + n.name);
     else { melden("🎉 Tour „" + t.name + "“ beendet – alle Halte erledigt!"); tourNaviBeenden(true); }
     zeichneTourNavi();
+    if (s.kinder && s.kinder.length) anwesenheitAbfragen(t, s); // Neu in 2.1
   }
 }
 
@@ -1369,20 +1591,20 @@ function zeichneKmBlatt(){
   });
   ziel.innerHTML = html;
 }
-function kmBlattCsv(){
-  const zeilen = ["Datum;Zeitraum;Tour;Kilometer"];
-  kmBlatt.forEach(e => {
-    zeilen.push([
-      new Date(e.t).toLocaleDateString("de-DE"),
-      e.zeitraum, e.tour,
-      e.km.toFixed(1).replace(".", ",")
-    ].map(x => '"' + String(x).replace(/"/g, '""') + '"').join(";"));
-  });
-  zeilen.push("");
+function kmBlattExcel(){ // Neu in 2.1: echte Excel-Datei statt CSV
+  const zeilen = [["Datum", "Zeitraum", "Tour", "Kilometer"]];
+  kmBlatt.forEach(e => zeilen.push([
+    new Date(e.t).toLocaleDateString("de-DE"), e.zeitraum, e.tour, Math.round(e.km * 10) / 10
+  ]));
+  zeilen.push([]);
   const gruppen = {};
   kmBlatt.forEach(e => { const m = monatsName(e.t); gruppen[m] = (gruppen[m] || 0) + e.km; });
-  Object.keys(gruppen).forEach(m => zeilen.push('"Summe ' + m + '";;;"' + gruppen[m].toFixed(1).replace(".", ",") + '"'));
-  return "﻿" + zeilen.join("\r\n");
+  Object.keys(gruppen).forEach(m => zeilen.push(["Summe " + m, "", "", Math.round(gruppen[m] * 10) / 10]));
+  const ws = XLSX.utils.aoa_to_sheet(zeilen);
+  ws["!cols"] = [{ wch: 12 }, { wch: 12 }, { wch: 30 }, { wch: 10 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Kilometer");
+  return wb;
 }
 /* Datei-Merker: die App merkt sich die gewählte Datei (z. B. Desktop → Köhler-App → Kilometer.csv) */
 function idbOeffnen(){
@@ -1398,7 +1620,7 @@ async function dateiMerken(h){
     const db = await idbOeffnen();
     await new Promise((res, rej) => {
       const tx = db.transaction("h", "readwrite");
-      tx.objectStore("h").put(h, "kilometer");
+      tx.objectStore("h").put(h, "kilometer-xlsx");
       tx.oncomplete = res; tx.onerror = () => rej(tx.error);
     });
   }catch(e){}
@@ -1407,7 +1629,7 @@ async function gemerkteDatei(){
   try{
     const db = await idbOeffnen();
     return await new Promise(res => {
-      const g = db.transaction("h").objectStore("h").get("kilometer");
+      const g = db.transaction("h").objectStore("h").get("kilometer-xlsx");
       g.onsuccess = () => res(g.result || null);
       g.onerror = () => res(null);
     });
@@ -1415,7 +1637,7 @@ async function gemerkteDatei(){
 }
 $("kmBlattSpeichernBtn").addEventListener("click", async () => {
   if (kmBlatt.length === 0){ banner("Noch keine Einträge im Kilometer-Blatt."); return; }
-  const csv = kmBlattCsv();
+  const wb = kmBlattExcel();
   if (window.showSaveFilePicker){ // PC: direkt in die Datei im Ordner „Köhler App" schreiben
     try{
       let h = await gemerkteDatei();
@@ -1425,25 +1647,22 @@ $("kmBlattSpeichernBtn").addEventListener("click", async () => {
       }
       if (!h){
         h = await window.showSaveFilePicker({
-          suggestedName: "Kilometer.csv",
-          types: [{ description: "Kilometer-Blatt (CSV für Excel)", accept: { "text/csv": [".csv"] } }]
+          suggestedName: "Kilometer.xlsx",
+          types: [{ description: "Kilometer-Blatt (Excel)", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }]
         });
         await dateiMerken(h);
       }
       const w = await h.createWritable();
-      await w.write(csv); await w.close();
-      banner("💾 Blatt „Kilometer“ gespeichert ✅");
+      await w.write(new Blob([XLSX.write(wb, { type: "array", bookType: "xlsx" })],
+        { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      await w.close();
+      banner("💾 Excel-Blatt „Kilometer“ gespeichert ✅");
       return;
     }catch(e){ if (e && e.name === "AbortError") return; }
   }
   // Handy oder ältere Browser: Datei herunterladen
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "Kilometer.csv";
-  a.click();
-  URL.revokeObjectURL(a.href);
-  banner("💾 Kilometer.csv heruntergeladen ✅");
+  XLSX.writeFile(wb, "Kilometer.xlsx");
+  banner("💾 Kilometer.xlsx heruntergeladen ✅");
 });
 $("kmBlattLoeschenBtn").addEventListener("click", () => {
   if (kmBlatt.length === 0){ banner("Das Kilometer-Blatt ist schon leer."); return; }
@@ -1475,7 +1694,7 @@ function appStart(){
   v12TourenAnlegen(); // Neu in 1.2: feste Touren beim ersten Start anlegen
   fuelleTourWahl();
   zeichneTouren(); zeichneZonenListe(); zeichneFahrtenbuch(); zeichneKmBlatt();
-  zeichneTourNavi(); zeichneAnrufe();
+  zeichneTourNavi(); zeichneAnrufe(); zeichneAnwesenheit();
   if (telLaufend){ telAnzeigeStart(); } // laufenden Anruf nach Neustart weiterzählen
   uhrTick(); uhrTimer = setInterval(uhrTick, 1000);
   if (aktiveFahrt){ // App wurde während einer Fahrt neu geladen → weiter aufzeichnen
