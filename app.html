@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://unpkg.com; connect-src 'self' https://nominatim.openstreetmap.org https://tile.openstreetmap.org https://unpkg.com https://router.project-osrm.org; worker-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#1e3a5f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Schulbus Fahrer</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
+<style>
+  :root{
+    --blau:#1e3a5f; --blau-hell:#2c5282; --gelb:#ffc107; --gelb-dunkel:#e6a800;
+    --bg:#f4f6f9; --karte-bg:#ffffff; --text:#1a202c; --text2:#5a6675;
+    --gruen:#2e7d32; --rot:#c62828; --rand:#e2e8f0;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg); color:var(--text); overscroll-behavior:none;
+  }
+  .hidden{display:none !important;}
+
+  /* ---------- Login ---------- */
+  #loginScreen{
+    position:fixed; inset:0; background:var(--blau); color:#fff; z-index:500;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px;
+  }
+  #loginScreen .logo{font-size:64px; margin-bottom:8px;}
+  #loginScreen h1{font-size:26px; margin-bottom:4px;}
+  #loginScreen p{color:#b8c7dc; margin-bottom:24px; text-align:center;}
+  #loginScreen form{width:100%; max-width:340px; display:flex; flex-direction:column; gap:12px;}
+  #loginScreen input{
+    padding:14px; border-radius:10px; border:none; font-size:17px; text-align:center;
+  }
+  #loginScreen button{
+    padding:14px; border-radius:10px; border:none; font-size:17px; font-weight:700;
+    background:var(--gelb); color:#1a202c; cursor:pointer;
+  }
+  #loginError{color:#ffab91; text-align:center; min-height:20px; font-size:14px;}
+
+  /* ---------- Grundgerüst ---------- */
+  #app{display:flex; flex-direction:column; height:100dvh;}
+  header{
+    background:var(--blau); color:#fff; padding:12px 16px calc(12px);
+    padding-top:calc(12px + env(safe-area-inset-top, 0px));
+    display:flex; align-items:center; gap:10px; flex-shrink:0;
+  }
+  header .bus{font-size:22px;}
+  header h1{font-size:18px; font-weight:700; flex:1;}
+  #tripDot{width:12px; height:12px; border-radius:50%; background:#546e7a;}
+  #tripDot.live{background:#ff5252; animation:blink 1.2s infinite;}
+  @keyframes blink{50%{opacity:.3}}
+
+  main{flex:1; overflow:hidden; position:relative;}
+  .view{display:none; height:100%; overflow-y:auto; padding:16px; padding-bottom:24px;}
+  .view.active{display:block;}
+  #view-karte{padding:0;}
+
+  nav{
+    display:flex; background:#fff; border-top:1px solid var(--rand); flex-shrink:0;
+    padding-bottom:var(--safe-b);
+  }
+  nav button{
+    flex:1; background:none; border:none; padding:8px 2px 6px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+    font-size:11px; color:var(--text2); font-family:inherit;
+  }
+  nav button .ic{font-size:22px;}
+  nav button.active{color:var(--blau); font-weight:700;}
+
+  /* ---------- Bausteine ---------- */
+  .card{background:#fff; border:1px solid var(--rand); border-radius:14px; padding:16px; margin-bottom:14px;}
+  .card h2{font-size:15px; color:var(--text2); font-weight:600; margin-bottom:10px; text-transform:uppercase; letter-spacing:.4px;}
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    padding:12px 18px; border-radius:10px; border:none; font-size:16px; font-weight:600;
+    cursor:pointer; font-family:inherit; background:var(--blau); color:#fff;
+  }
+  .btn.gelb{background:var(--gelb); color:#1a202c;}
+  .btn.rot{background:var(--rot);}
+  .btn.hell{background:#e8edf4; color:var(--blau);}
+  .btn.klein{padding:8px 12px; font-size:14px; border-radius:8px;}
+  .btn.voll{width:100%;}
+  .btn:disabled{opacity:.5; cursor:default;}
+
+  /* Fahrt-Ansicht */
+  #uhr{font-size:44px; font-weight:800; text-align:center; letter-spacing:1px;}
+  #datum{text-align:center; color:var(--text2); margin-bottom:4px;}
+  #startBtn{
+    width:100%; padding:22px; font-size:22px; font-weight:800; border-radius:16px; border:none;
+    cursor:pointer; font-family:inherit; margin:10px 0 4px;
+    background:var(--gruen); color:#fff; box-shadow:0 4px 14px rgba(46,125,50,.35);
+  }
+  #startBtn.laeuft{background:var(--rot); box-shadow:0 4px 14px rgba(198,40,40,.35);}
+  #startInfo{text-align:center; color:var(--text2); font-size:14px; min-height:20px;}
+  .statGrid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:10px;}
+  .stat{background:#fff; border:1px solid var(--rand); border-radius:12px; padding:12px 8px; text-align:center;}
+  .stat .w{font-size:22px; font-weight:800;}
+  .stat .l{font-size:12px; color:var(--text2);}
+  select, .feld input, .feld select{
+    width:100%; padding:12px; border-radius:10px; border:1px solid var(--rand);
+    font-size:16px; font-family:inherit; background:#fff; color:var(--text);
+  }
+  .feld{margin-bottom:12px;}
+  .feld label{display:block; font-size:13px; color:var(--text2); margin-bottom:5px; font-weight:600;}
+
+  /* Karte */
+  #map{position:absolute; inset:0;}
+  #mapHint{
+    position:absolute; top:12px; left:12px; right:12px; z-index:1000;
+    background:var(--blau); color:#fff; padding:12px; border-radius:10px; text-align:center;
+    font-weight:600; box-shadow:0 4px 12px rgba(0,0,0,.25);
+  }
+  #locBtn{
+    position:absolute; bottom:20px; right:14px; z-index:1000;
+    width:52px; height:52px; border-radius:50%; border:none; background:#fff; font-size:24px;
+    box-shadow:0 3px 10px rgba(0,0,0,.25); cursor:pointer;
+  }
+
+  /* Listen */
+  .zeile{
+    background:#fff; border:1px solid var(--rand); border-radius:12px;
+    padding:12px 14px; margin-bottom:10px;
+  }
+  .zeile .kopf{display:flex; align-items:center; gap:10px;}
+  .zeile .kopf .titel{flex:1; font-weight:700;}
+  .zeile .sub{color:var(--text2); font-size:14px; margin-top:2px;}
+  .stopZeile{display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid var(--rand);}
+  .stopZeile:first-of-type{margin-top:8px;}
+  .stopZeile input[type=checkbox]{width:22px; height:22px; accent-color:var(--gruen); flex-shrink:0;}
+  .stopZeile .sname{flex:1; font-size:15px;}
+  .stopZeile .sname.done{text-decoration:line-through; color:var(--text2);}
+  .leer{color:var(--text2); text-align:center; padding:24px 12px; font-size:15px;}
+  .ereignis{font-size:14px; padding:6px 0; border-top:1px solid var(--rand); color:var(--text2);}
+  .ereignis b{color:var(--text);}
+
+  /* Banner (Geofence-Meldung) */
+  #banner{
+    position:fixed; top:16px; left:16px; right:16px; z-index:2000;
+    background:var(--gelb); color:#1a202c; padding:14px 16px; border-radius:12px;
+    font-weight:700; box-shadow:0 6px 20px rgba(0,0,0,.3); text-align:center;
+    transform:translateY(-120px); transition:transform .3s;
+  }
+  #banner.zeig{transform:translateY(0);}
+
+  /* Modal */
+  #modalWrap{
+    position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:1500;
+    display:flex; align-items:flex-end; justify-content:center;
+  }
+  @media(min-width:600px){ #modalWrap{align-items:center;} }
+  #modal{
+    background:#fff; border-radius:18px 18px 0 0; width:100%; max-width:560px;
+    max-height:85dvh; overflow-y:auto; padding:20px; padding-bottom:calc(20px + var(--safe-b));
+  }
+  @media(min-width:600px){ #modal{border-radius:18px;} }
+  #modal h3{margin-bottom:14px; font-size:18px;}
+  #modal .knoepfe{display:flex; gap:10px; margin-top:16px;}
+  #modal .knoepfe .btn{flex:1;}
+  .suchErg{padding:10px; border:1px solid var(--rand); border-radius:8px; margin-top:8px; font-size:14px; cursor:pointer;}
+  .suchErg:hover{background:var(--bg);}
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="loginScreen">
+  <div class="logo">🚌</div>
+  <h1>Schulbus Fahrer</h1>
+  <p id="loginText">Anmelden</p>
+  <form id="loginForm">
+    <input type="text" id="loginName" placeholder="Dein Name" autocomplete="name">
+    <input type="password" id="loginPin" placeholder="PIN (4-stellig)" inputmode="numeric" maxlength="8">
+    <input type="password" id="loginPin2" placeholder="PIN wiederholen" inputmode="numeric" maxlength="8" class="hidden">
+    <button type="submit" id="loginBtn">Anmelden</button>
+    <div id="loginError"></div>
+  </form>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="hidden">
+  <header>
+    <span class="bus">🚌</span>
+    <h1>Schulbus Fahrer</h1>
+    <div id="tripDot" title="Fahrtstatus"></div>
+  </header>
+
+  <main>
+    <!-- FAHRT -->
+    <section class="view active" id="view-fahrt">
+      <div id="datum"></div>
+      <div id="uhr">--:--</div>
+      <div class="card" style="margin-top:14px;">
+        <div class="feld">
+          <label>Auftrag / Tour für diese Fahrt</label>
+          <select id="tourWahl"><option value="">Ohne Tour</option></select>
+        </div>
+        <button id="startBtn">▶ &nbsp;Fahrt starten</button>
+        <div id="startInfo"></div>
+      </div>
+      <div class="statGrid">
+        <div class="stat"><div class="w" id="stDauer">–</div><div class="l">Dauer</div></div>
+        <div class="stat"><div class="w" id="stKm">–</div><div class="l">km</div></div>
+        <div class="stat"><div class="w" id="stTempo">–</div><div class="l">km/h</div></div>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <h2>Heute &amp; dieser Monat</h2>
+        <div class="statGrid" style="grid-template-columns:1fr 1fr; margin-top:0;">
+          <div class="stat"><div class="w" id="stHeuteKm">0,0</div><div class="l">km heute</div></div>
+          <div class="stat"><div class="w" id="stHeuteZeit">0 min</div><div class="l">Fahrzeit heute</div></div>
+          <div class="stat"><div class="w" id="stMonatKm">0,0</div><div class="l" id="stMonatKmL">km im Monat</div></div>
+          <div class="stat"><div class="w" id="stMonatZeit">0 min</div><div class="l">Fahrzeit im Monat</div></div>
+        </div>
+        <p style="font-size:12px; color:var(--text2); margin-top:8px; text-align:center;">
+          Zählt automatisch bis Monatsende zusammen und beginnt dann neu.
+        </p>
+      </div>
+      <div class="card" id="liveEventsCard" style="margin-top:14px;">
+        <h2>Ereignisse dieser Fahrt</h2>
+        <div id="liveEvents"><div class="leer">Noch keine Ereignisse.</div></div>
+      </div>
+    </section>
+
+    <!-- KARTE -->
+    <section class="view" id="view-karte">
+      <div id="map"></div>
+      <div id="mapHint" class="hidden"></div>
+      <button id="locBtn" title="Mein Standort">📍</button>
+    </section>
+
+    <!-- AUFTRÄGE -->
+    <section class="view" id="view-auftraege">
+      <div class="card hidden" id="tourNaviCard" style="border:2px solid var(--gelb); background:#fffdf2;"></div>
+      <button class="btn gelb voll" id="neueTourBtn" style="margin-bottom:14px;">＋ Neue Tour anlegen</button>
+      <div id="tourListe"></div>
+    </section>
+
+    <!-- TELEFON -->
+    <section class="view" id="view-telefon">
+      <div class="card">
+        <h2>📞 Neuer Anruf</h2>
+        <div class="feld">
+          <label>Telefonnummer</label>
+          <input id="telNummer" inputmode="tel" placeholder="z. B. 0175 1234567">
+        </div>
+        <div id="telStartKnoepfe" style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn" id="telEinBtn" style="flex:1;">📥 Eingehender Anruf</button>
+          <button class="btn gelb" id="telAusBtn" style="flex:1;">📤 Wählen &amp; los</button>
+        </div>
+        <div id="telLaufend" class="hidden" style="margin-top:12px; text-align:center;">
+          <div style="font-size:30px; font-weight:800;" id="telTimer">0:00</div>
+          <div style="color:var(--text2); font-size:13px;">Gesprächszeit läuft…</div>
+          <button class="btn rot voll" id="telEndeBtn" style="margin-top:10px;">⏹ Anruf beenden &amp; speichern</button>
+        </div>
+        <p style="font-size:12px; color:var(--text2); margin-top:10px;">
+          Hinweis: Die Anrufliste des Handys darf eine Web-App aus Datenschutzgründen nicht auslesen.
+          Deshalb: Nummer eintippen, Knopf drücken – Datum, Uhrzeit und Gesprächszeit speichert die App automatisch.
+        </p>
+      </div>
+      <div class="card">
+        <h2>Anruf-Liste</h2>
+        <div id="telListe"></div>
+        <button class="btn hell klein" id="telCsvBtn" style="margin-top:10px;">⬇ Als CSV exportieren</button>
+      </div>
+    </section>
+
+    <!-- FAHRTENBUCH -->
+    <section class="view" id="view-fahrtenbuch">
+      <div class="card">
+        <h2>Übersicht</h2>
+        <div id="fbSumme" style="font-size:15px;"></div>
+        <button class="btn hell klein" id="csvBtn" style="margin-top:10px;">⬇ Als CSV exportieren</button>
+      </div>
+      <div class="card">
+        <h2>📄 Kilometer-Blatt (Köhler App)</h2>
+        <div id="kmBlattListe"></div>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+          <button class="btn klein" id="kmBlattSpeichernBtn">💾 Blatt „Kilometer" speichern</button>
+          <button class="btn rot klein" id="kmBlattLoeschenBtn">🗑 Alles löschen</button>
+        </div>
+        <p style="font-size:12px; color:var(--text2); margin-top:8px;">
+          Jeder ⏹&nbsp;Stop trägt die gefahrenen Kilometer hier ein (Vormittag / Mittag / Nachmittag).
+          Am Monatsende: erst 💾 speichern, dann auf deinen Wunsch 🗑 löschen.
+        </p>
+      </div>
+      <div id="tripListe"></div>
+    </section>
+
+    <!-- MEHR -->
+    <section class="view" id="view-mehr">
+      <div class="card">
+        <h2>Geofencing-Zonen</h2>
+        <p style="font-size:14px; color:var(--text2); margin-bottom:10px;">
+          Beim Ein- und Ausfahren einer Zone (z.&nbsp;B. Schule, Depot) wird die Zeit automatisch im Fahrtenbuch vermerkt und du bekommst eine Meldung.
+        </p>
+        <button class="btn gelb klein" id="neueZoneBtn">＋ Neue Zone</button>
+        <div id="zonenListe" style="margin-top:10px;"></div>
+      </div>
+      <div class="card">
+        <h2>Benachrichtigungen</h2>
+        <button class="btn hell klein" id="notifBtn">🔔 Meldungen erlauben</button>
+      </div>
+      <div class="card">
+        <h2>Konto</h2>
+        <div id="profilInfo" style="margin-bottom:10px;"></div>
+        <button class="btn hell klein" id="logoutBtn">Abmelden</button>
+        <button class="btn rot klein" id="resetBtn" style="margin-left:8px;">Alle Daten löschen</button>
+      </div>
+      <div class="card">
+        <h2>Info</h2>
+        <p style="font-size:14px; color:var(--text2);">
+          Alle Daten werden nur auf diesem Gerät gespeichert. <b>Version 1.4</b><br><br>
+          Neu in 1.4:<br>
+          • ▶ „Tour starten“: das Navi ruft die Halte automatisch nacheinander auf (1 → 2 → 3 …) bis die Tour fertig ist<br>
+          • GPS-Ankunft: erreichst du einen Halt, wird er von selbst abgehakt<br>
+          • 📞 Neuer Tab „Telefon“: Anrufe mit Datum, Uhrzeit, Nummer, Richtung und Gesprächszeit festhalten, mit CSV-Export<br><br>
+          Aus Version 1.2:<br>
+          • Deine 3 Touren (Vormittag, Mittag 12:20, Nachmittag 15:20) sind fest eingebaut<br>
+          • 🗺️ „Route zeigen“: die ganze Tour als Strecke auf der Karte, mit km und Fahrzeit<br>
+          • 🧭 „Tour-Navi“: Google Maps navigiert die komplette Tour mit allen Halten<br>
+          • ⏹ Stop-Knopf trägt die Kilometer ins neue Kilometer-Blatt ein (Vormittag/Mittag/Nachmittag)<br>
+          • 📄 Kilometer-Blatt: Monatssumme, Speichern in „Köhler App“, Löschen nur auf deinen Wunsch<br><br>
+          Aus Version 1.1:<br>
+          • Standort-Protokoll auf der Karte (Uhrzeit + km-Stand)<br>
+          • Kilometer und Fahrzeit pro Tag und pro Monat<br>
+          • Sicherheits-Update (geprüfte Kartenbibliothek, strengere Schutzregeln)
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <nav>
+    <button data-view="fahrt" class="active"><span class="ic">🚌</span>Fahrt</button>
+    <button data-view="karte"><span class="ic">🗺️</span>Karte</button>
+    <button data-view="auftraege"><span class="ic">📋</span>Aufträge</button>
+    <button data-view="fahrtenbuch"><span class="ic">📖</span>Fahrtenbuch</button>
+    <button data-view="telefon"><span class="ic">📞</span>Telefon</button>
+    <button data-view="mehr"><span class="ic">⚙️</span>Mehr</button>
+  </nav>
+</div>
+
+<div id="banner"></div>
+<div id="modalWrap" class="hidden"><div id="modal"></div></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+<script>
+"use strict";
+/* ================= Speicher ================= */
+const store = {
+  get(k, d){ try{ const v = JSON.parse(localStorage.getItem(k)); return v === null || v === undefined ? d : v; }catch(e){ return d; } },
+  set(k, v){ localStorage.setItem(k, JSON.stringify(v)); },
+  del(k){ localStorage.removeItem(k); }
+};
+let profil  = store.get("sf_profil", null);
+let trips   = store.get("sf_trips", []);
+let touren  = store.get("sf_touren", []);
+let zonen   = store.get("sf_zonen", []);
+let aktiveFahrt = store.get("sf_aktiv", null);
+let kmBlatt = store.get("sf_kmblatt", []); // Neu in 1.2: Kilometer-Blatt für die Köhler App
+
+const $ = id => document.getElementById(id);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const fmtZeit = t => new Date(t).toLocaleTimeString("de-DE", {hour:"2-digit", minute:"2-digit"});
+const fmtDatum = t => new Date(t).toLocaleDateString("de-DE", {weekday:"short", day:"2-digit", month:"2-digit", year:"numeric"});
+function fmtDauer(ms){
+  const s = Math.floor(ms/1000), h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+  return (h>0 ? h+" h " : "") + m + " min";
+}
+/* ---- Tages- und Monatssummen ---- */
+function tagesAnfang(){ const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); }
+function monatsAnfang(){ const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).getTime(); }
+function tripsImZeitraum(ab){ return trips.filter(t => t.start >= ab); }
+function summe(liste){
+  return {
+    km:   liste.reduce((s, t) => s + (t.km || 0), 0),
+    zeit: liste.reduce((s, t) => s + ((t.ende || t.start) - t.start), 0)
+  };
+}
+/* Summen inkl. der gerade laufenden Fahrt */
+function statistik(){
+  const heute = summe(tripsImZeitraum(tagesAnfang()));
+  const monat = summe(tripsImZeitraum(monatsAnfang()));
+  if (aktiveFahrt){
+    const laufKm = aktiveFahrt.km || 0, laufZeit = Date.now() - aktiveFahrt.start;
+    heute.km += laufKm; heute.zeit += laufZeit;
+    monat.km += laufKm; monat.zeit += laufZeit;
+  }
+  return { heute, monat };
+}
+function haversine(a, b){ // Meter zwischen [lat,lng]-Punkten
+  const R = 6371000, rad = x => x*Math.PI/180;
+  const dLat = rad(b[0]-a[0]), dLng = rad(b[1]-a[1]);
+  const q = Math.sin(dLat/2)**2 + Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(q));
+}
+async function hashPin(pin){
+  if (crypto.subtle){
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("sf|"+pin));
+    return [...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,"0")).join("");
+  }
+  let h = 5381; for (const c of "sf|"+pin) h = ((h*33) ^ c.charCodeAt(0)) >>> 0;
+  return "x"+h.toString(16);
+}
+
+/* ================= Login ================= */
+const neuRegistrieren = !profil;
+if (neuRegistrieren){
+  $("loginText").textContent = "Willkommen! Lege deinen Namen und eine PIN fest.";
+  $("loginPin2").classList.remove("hidden");
+  $("loginBtn").textContent = "Konto anlegen";
+} else {
+  $("loginName").value = profil.name;
+}
+$("loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = $("loginName").value.trim(), pin = $("loginPin").value.trim();
+  if (!name || pin.length < 4){ $("loginError").textContent = "Bitte Name und mindestens 4-stellige PIN eingeben."; return; }
+  if (!profil){
+    if (pin !== $("loginPin2").value.trim()){ $("loginError").textContent = "Die PINs stimmen nicht überein."; return; }
+    profil = { name, pinHash: await hashPin(pin), seit: Date.now() };
+    store.set("sf_profil", profil);
+    appStart();
+  } else {
+    if (await hashPin(pin) === profil.pinHash){ appStart(); }
+    else { $("loginError").textContent = "Falsche PIN."; }
+  }
+});
+
+/* ================= Ansichten ================= */
+let aktuelleAnsicht = "fahrt";
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => zeige(b.dataset.view)));
+function zeige(v){
+  aktuelleAnsicht = v;
+  document.querySelectorAll(".view").forEach(x => x.classList.toggle("active", x.id === "view-"+v));
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x.dataset.view === v));
+  if (v === "karte" && map) setTimeout(() => map.invalidateSize(), 60);
+}
+
+/* ================= Karte ================= */
+let map, ebeneStops, ebeneZonen, ebenePfad, ebeneProtokoll, ebeneRoute, liveMarker, livePfad;
+let pickModus = null; // {typ:'stop'|'zone', weiter:fn}
+function karteInit(){
+  map = L.map("map").setView([51.163, 10.447], 6);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "© OpenStreetMap"
+  }).addTo(map);
+  ebeneZonen = L.layerGroup().addTo(map);
+  ebeneRoute = L.layerGroup().addTo(map);
+  ebeneStops = L.layerGroup().addTo(map);
+  ebenePfad  = L.layerGroup().addTo(map);
+  ebeneProtokoll = L.layerGroup().addTo(map);
+  map.on("click", e => {
+    if (!pickModus) return;
+    const m = pickModus; pickModus = null;
+    $("mapHint").classList.add("hidden");
+    m.weiter([e.latlng.lat, e.latlng.lng]);
+  });
+  zeichneZonen(); zeichneStops();
+}
+$("locBtn").addEventListener("click", () => {
+  navigator.geolocation.getCurrentPosition(
+    p => { const ll = [p.coords.latitude, p.coords.longitude]; setzeLiveMarker(ll); map.setView(ll, 16); },
+    () => banner("Standort nicht verfügbar. GPS erlauben?"),
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+});
+function setzeLiveMarker(ll){
+  if (!liveMarker){
+    liveMarker = L.circleMarker(ll, { radius: 9, color: "#fff", weight: 3, fillColor: "#1976d2", fillOpacity: 1 }).addTo(map);
+  } else liveMarker.setLatLng(ll);
+}
+function kartePunktWaehlen(hinweis, weiter){
+  pickModus = { weiter };
+  zeige("karte");
+  $("mapHint").textContent = hinweis;
+  $("mapHint").classList.remove("hidden");
+}
+function zeichneZonen(){
+  ebeneZonen.clearLayers();
+  zonen.forEach(z => {
+    L.circle([z.lat, z.lng], { radius: z.radius, color: "#e6a800", fillColor: "#ffc107", fillOpacity: .18 })
+      .bindPopup("🚧 Zone: <b>"+z.name+"</b><br>Radius "+z.radius+" m").addTo(ebeneZonen);
+  });
+}
+function zeichneStops(tourDirekt){
+  ebeneStops.clearLayers();
+  const tour = tourDirekt || touren.find(t => t.id === $("tourWahl").value);
+  if (!tour) return;
+  tour.stops.forEach((s, i) => {
+    L.marker([s.lat, s.lng], { icon: L.divIcon({ className: "", html:
+      "<div style='background:#1e3a5f;color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)'>"+(i+1)+"</div>",
+      iconSize: [26,26], iconAnchor: [13,13] }) })
+      .bindPopup("🚏 <b>"+s.name+"</b>").addTo(ebeneStops);
+  });
+}
+/* Neu in 1.2: Fahrstrecke einer Tour über die Straßen berechnen und auf der Karte zeigen */
+const routenCache = {};
+async function tourRouteZeigen(t){
+  if (!t.stops || t.stops.length < 2){ banner("Diese Tour braucht mindestens 2 Haltestellen."); return; }
+  zeige("karte");
+  zeichneStops(t);
+  ebeneRoute.clearLayers();
+  banner("🗺️ Route wird berechnet…");
+  try{
+    let geo = routenCache[t.id + "_" + t.stops.length];
+    if (!geo){
+      const koords = t.stops.map(s => s.lng + "," + s.lat).join(";");
+      const r = await fetch("https://router.project-osrm.org/route/v1/driving/" + koords + "?overview=full&geometries=geojson");
+      const dat = await r.json();
+      if (!dat.routes || !dat.routes.length) throw new Error("keine Route");
+      geo = {
+        punkte: dat.routes[0].geometry.coordinates.map(c => [c[1], c[0]]),
+        km: dat.routes[0].distance / 1000,
+        min: Math.round(dat.routes[0].duration / 60)
+      };
+      routenCache[t.id + "_" + t.stops.length] = geo;
+    }
+    const linie = L.polyline(geo.punkte, { color: "#1976d2", weight: 5, opacity: .85 }).addTo(ebeneRoute);
+    map.invalidateSize();
+    map.fitBounds(linie.getBounds(), { padding: [30, 30] });
+    banner("🗺️ " + t.name + ": " + geo.km.toFixed(1).replace(".", ",") + " km · ca. " + geo.min + " min Fahrzeit");
+  }catch(e){
+    // Notlösung ohne Internet: gerade Linien zwischen den Halten
+    const linie = L.polyline(t.stops.map(s => [s.lat, s.lng]), { color: "#1976d2", weight: 4, dashArray: "8 8" }).addTo(ebeneRoute);
+    map.invalidateSize();
+    map.fitBounds(linie.getBounds(), { padding: [30, 30] });
+    banner("Route konnte nicht berechnet werden (Internet?). Zeige direkte Verbindung.");
+  }
+}
+
+/* Neu in 1.2: ganze Tour mit allen Halten an Google Maps übergeben */
+function tourNaviAlle(t){
+  if (!t.stops || t.stops.length === 0){ banner("Diese Tour hat noch keine Haltestellen."); return; }
+  const ziel = t.stops[t.stops.length - 1];
+  let url = "https://www.google.com/maps/dir/?api=1&destination=" + ziel.lat + "," + ziel.lng + "&travelmode=driving";
+  if (t.stops.length > 1){
+    const zwischen = t.stops.slice(0, -1).map(s => s.lat + "," + s.lng).join("|");
+    url += "&waypoints=" + encodeURIComponent(zwischen);
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function zeigePfad(punkte, protokoll){
+  ebenePfad.clearLayers();
+  zeichneProtokoll(protokoll);
+  if (!punkte || punkte.length < 2) return;
+  const ll = punkte.map(p => [p[0], p[1]]);
+  const linie = L.polyline(ll, { color: "#c62828", weight: 4 }).addTo(ebenePfad);
+  map.invalidateSize(); // Karte war evtl. gerade noch ausgeblendet
+  map.fitBounds(linie.getBounds(), { padding: [30, 30] });
+}
+/* Standort-Protokoll: kleine Punkte mit Uhrzeit und km-Stand auf der Karte */
+function zeichneProtokoll(eintraege){
+  ebeneProtokoll.clearLayers();
+  (eintraege || []).forEach(p => {
+    L.circleMarker([p.lat, p.lng], { radius: 6, color: "#fff", weight: 2, fillColor: "#e6a800", fillOpacity: 1 })
+      .bindPopup("🕐 <b>" + fmtZeit(p.t) + " Uhr</b><br>Fahrt: " + p.km.toFixed(1).replace(".", ",") +
+                 " km<br>km-Stand Monat: " + p.kmMonat.toFixed(1).replace(".", ",") + " km")
+      .addTo(ebeneProtokoll);
+  });
+}
+
+/* ================= Fahrt / GPS ================= */
+let watchId = null, uhrTimer = null, wakeLock = null, zonenStatus = {};
+
+function uhrTick(){
+  const jetzt = new Date();
+  $("uhr").textContent = jetzt.toLocaleTimeString("de-DE", {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+  $("datum").textContent = fmtDatum(jetzt);
+  if (aktiveFahrt) $("stDauer").textContent = fmtDauer(Date.now() - aktiveFahrt.start);
+  if (jetzt.getSeconds() % 5 === 0 || aktiveFahrt) statistikAnzeigen();
+}
+
+function statistikAnzeigen(){
+  const s = statistik();
+  $("stHeuteKm").textContent   = s.heute.km.toFixed(1).replace(".", ",");
+  $("stHeuteZeit").textContent = fmtDauer(s.heute.zeit);
+  $("stMonatKm").textContent   = s.monat.km.toFixed(1).replace(".", ",");
+  $("stMonatZeit").textContent = fmtDauer(s.monat.zeit);
+  $("stMonatKmL").textContent  = "km im " + new Date().toLocaleDateString("de-DE", { month: "long" });
+}
+
+$("startBtn").addEventListener("click", () => { aktiveFahrt ? fahrtBeenden() : fahrtStarten(); });
+
+function fahrtStarten(){
+  if (!navigator.geolocation){ banner("Dieses Gerät unterstützt kein GPS."); return; }
+  const tour = touren.find(t => t.id === $("tourWahl").value);
+  aktiveFahrt = {
+    id: uid(), start: Date.now(), tourId: tour ? tour.id : "", tourName: tour ? tour.name : "",
+    punkte: [], km: 0, ereignisse: [],
+    protokoll: [], kmMonatStart: summe(tripsImZeitraum(monatsAnfang())).km
+  };
+  zeichneProtokoll([]);
+  zonenStatus = {}; zonen.forEach(z => zonenStatus[z.id] = false);
+  store.set("sf_aktiv", aktiveFahrt);
+  gpsStarten();
+  wakeLockAnfordern();
+  fahrtUiAktualisieren();
+  banner("Fahrt gestartet um " + fmtZeit(aktiveFahrt.start) + " ✅");
+}
+
+function fahrtBeenden(){
+  if (!confirm("⏹ Stop – Fahrt beenden und Kilometer ins Kilometer-Blatt eintragen?")) return;
+  gpsStoppen();
+  aktiveFahrt.ende = Date.now();
+  aktiveFahrt.km = Math.round(aktiveFahrt.km * 100) / 100;
+  trips.unshift(aktiveFahrt);
+  store.set("sf_trips", trips);
+  const f = aktiveFahrt;
+  aktiveFahrt = null; store.del("sf_aktiv");
+  if (wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; }
+  if (livePfad){ ebenePfad.removeLayer(livePfad); livePfad = null; }
+  kilometerEintragen(f); // Neu in 1.2: Eintrag ins Kilometer-Blatt
+  fahrtUiAktualisieren(); zeichneFahrtenbuch(); statistikAnzeigen();
+  banner("⏹ Stop: " + fmtDauer(f.ende - f.start) + ", " + f.km.toFixed(1).replace(".", ",") + " km ins Kilometer-Blatt eingetragen 📄");
+}
+
+function gpsStarten(){
+  watchId = navigator.geolocation.watchPosition(gpsPunkt, err => {
+    $("startInfo").textContent = "⚠️ GPS-Fehler: " + err.message;
+  }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+}
+function gpsStoppen(){
+  if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+}
+function gpsPunkt(pos){
+  if (!aktiveFahrt) return;
+  const { latitude: lat, longitude: lng, accuracy: acc, speed } = pos.coords;
+  if (acc > 80) return; // sehr ungenaue Punkte verwerfen
+  const p = [lat, lng, Date.now()];
+  const letzte = aktiveFahrt.punkte[aktiveFahrt.punkte.length - 1];
+  if (letzte){
+    const d = haversine(letzte, p);
+    const dt = (p[2] - letzte[2]) / 1000;
+    if (d < 4 && dt < 10) return;           // Stillstand nicht aufzeichnen
+    if (dt > 0 && d / dt < 70) aktiveFahrt.km += d / 1000; // >250 km/h = GPS-Sprung, ignorieren
+  }
+  aktiveFahrt.punkte.push(p);
+  standortProtokollieren(lat, lng);
+  store.set("sf_aktiv", aktiveFahrt);
+  setzeLiveMarker([lat, lng]);
+  if (!livePfad){ livePfad = L.polyline([[lat, lng]], { color: "#c62828", weight: 4 }).addTo(ebenePfad); }
+  else livePfad.addLatLng([lat, lng]);
+  if (aktuelleAnsicht === "karte" && !pickModus) map.panTo([lat, lng]);
+  $("stKm").textContent = aktiveFahrt.km.toFixed(1);
+  $("stTempo").textContent = speed != null ? Math.round(speed * 3.6) : "–";
+  zonenPruefen(lat, lng);
+  tourLaufGps(lat, lng); // Neu in 1.4: Ankunft am nächsten Halt erkennen
+}
+
+/* Alle 60 Sekunden einen Standort mit Uhrzeit und km-Stand festhalten */
+function standortProtokollieren(lat, lng){
+  if (!aktiveFahrt.protokoll) aktiveFahrt.protokoll = [];
+  const letzter = aktiveFahrt.protokoll[aktiveFahrt.protokoll.length - 1];
+  if (letzter && Date.now() - letzter.t < 60000) return;
+  const km = Math.round(aktiveFahrt.km * 10) / 10;
+  const eintrag = {
+    t: Date.now(), lat, lng, km,
+    kmMonat: Math.round(((aktiveFahrt.kmMonatStart || 0) + km) * 10) / 10
+  };
+  aktiveFahrt.protokoll.push(eintrag);
+  zeichneProtokoll(aktiveFahrt.protokoll);
+}
+
+function zonenPruefen(lat, lng){
+  zonen.forEach(z => {
+    const drin = haversine([lat, lng], [z.lat, z.lng]) < z.radius;
+    if (drin !== zonenStatus[z.id]){
+      zonenStatus[z.id] = drin;
+      const e = { t: Date.now(), zone: z.name, typ: drin ? "Einfahrt" : "Ausfahrt" };
+      aktiveFahrt.ereignisse.push(e);
+      store.set("sf_aktiv", aktiveFahrt);
+      melden((drin ? "🟢 Einfahrt: " : "🔴 Ausfahrt: ") + z.name + " (" + fmtZeit(e.t) + ")");
+      zeichneLiveEreignisse();
+    }
+  });
+}
+
+async function wakeLockAnfordern(){
+  try{ if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); }catch(e){}
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && aktiveFahrt && !wakeLock) wakeLockAnfordern();
+});
+
+function fahrtUiAktualisieren(){
+  const laeuft = !!aktiveFahrt;
+  $("startBtn").textContent = laeuft ? "⏹  Stop" : "▶  Fahrt starten";
+  $("startBtn").classList.toggle("laeuft", laeuft);
+  $("tripDot").classList.toggle("live", laeuft);
+  $("tourWahl").disabled = laeuft;
+  $("startInfo").textContent = laeuft
+    ? "Fahrt läuft seit " + fmtZeit(aktiveFahrt.start) + (aktiveFahrt.tourName ? " · Tour: " + aktiveFahrt.tourName : "")
+    : "";
+  if (!laeuft){ $("stDauer").textContent = "–"; $("stKm").textContent = "–"; $("stTempo").textContent = "–"; }
+  zeichneLiveEreignisse();
+}
+function zeichneLiveEreignisse(){
+  const ziel = $("liveEvents");
+  if (!aktiveFahrt || aktiveFahrt.ereignisse.length === 0){
+    ziel.innerHTML = "<div class='leer'>Noch keine Ereignisse.</div>"; return;
+  }
+  ziel.innerHTML = aktiveFahrt.ereignisse.map(e =>
+    "<div class='ereignis'><b>" + fmtZeit(e.t) + "</b> – " + e.typ + " " + e.zone + "</div>").join("");
+}
+
+/* ================= Meldungen ================= */
+let bannerTimer = null;
+function banner(text){
+  const b = $("banner");
+  b.textContent = text; b.classList.add("zeig");
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => b.classList.remove("zeig"), 4500);
+}
+function melden(text){
+  banner(text);
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  if ("Notification" in window && Notification.permission === "granted"){
+    try{ new Notification("Schulbus Fahrer", { body: text, icon: "icon-192.png" }); }catch(e){}
+  }
+}
+$("notifBtn").addEventListener("click", async () => {
+  if (!("Notification" in window)){ banner("Dieses Gerät unterstützt keine Benachrichtigungen."); return; }
+  const erg = await Notification.requestPermission();
+  banner(erg === "granted" ? "Benachrichtigungen sind aktiv ✅" : "Benachrichtigungen wurden nicht erlaubt.");
+});
+
+/* ================= Modal ================= */
+function modal(html){
+  $("modal").innerHTML = html;
+  $("modalWrap").classList.remove("hidden");
+}
+function modalZu(){ $("modalWrap").classList.add("hidden"); }
+$("modalWrap").addEventListener("click", e => { if (e.target === $("modalWrap")) modalZu(); });
+
+/* Ort wählen: gemeinsamer Dialog für Stops und Zonen.
+   weiter([lat,lng]) wird aufgerufen, sobald eine Position feststeht. */
+function ortWaehlen(titel, weiter){
+  modal(
+    "<h3>" + titel + "</h3>" +
+    "<button class='btn voll' id='owGps' style='margin-bottom:10px;'>📍 Aktuellen Standort verwenden</button>" +
+    "<button class='btn voll hell' id='owKarte' style='margin-bottom:14px;'>🗺️ Auf der Karte antippen</button>" +
+    "<div class='feld'><label>Oder Adresse suchen</label>" +
+    "<div style='display:flex; gap:8px;'><input id='owSuche' placeholder='z. B. Schulstraße 1, Berlin' style='flex:1; padding:12px; border:1px solid var(--rand); border-radius:10px; font-size:16px;'>" +
+    "<button class='btn klein' id='owSuchBtn'>🔍</button></div><div id='owErg'></div></div>" +
+    "<div class='knoepfe'><button class='btn hell' id='owAbbruch'>Abbrechen</button></div>"
+  );
+  $("owAbbruch").onclick = modalZu;
+  $("owGps").onclick = () => {
+    modalZu();
+    navigator.geolocation.getCurrentPosition(
+      p => weiter([p.coords.latitude, p.coords.longitude]),
+      () => banner("Standort nicht verfügbar."),
+      { enableHighAccuracy: true, timeout: 10000 });
+  };
+  $("owKarte").onclick = () => { modalZu(); kartePunktWaehlen("👆 Tippe auf die Karte, um die Position festzulegen", weiter); };
+  $("owSuchBtn").onclick = async () => {
+    const q = $("owSuche").value.trim();
+    if (!q) return;
+    $("owErg").innerHTML = "<div class='leer'>Suche läuft…</div>";
+    try{
+      const r = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=5&q=" + encodeURIComponent(q));
+      const dat = await r.json();
+      if (dat.length === 0){ $("owErg").innerHTML = "<div class='leer'>Nichts gefunden.</div>"; return; }
+      $("owErg").innerHTML = dat.map((d, i) => "<div class='suchErg' data-i='" + i + "'>" + d.display_name + "</div>").join("");
+      $("owErg").querySelectorAll(".suchErg").forEach(el => el.onclick = () => {
+        const d = dat[+el.dataset.i]; modalZu(); weiter([+d.lat, +d.lon]);
+      });
+    }catch(e){ $("owErg").innerHTML = "<div class='leer'>Suche fehlgeschlagen (Internet?).</div>"; }
+  };
+}
+
+/* ================= Aufträge / Touren ================= */
+function speichereTouren(){ store.set("sf_touren", touren); zeichneTouren(); fuelleTourWahl(); zeichneStops(); }
+
+/* Neu in 1.2: die drei festen Touren werden beim ersten Start automatisch angelegt */
+function v12TourenAnlegen(){
+  if (store.get("sf_v12touren", false)) return;
+  const anlegen = (name, liste) => {
+    if (touren.some(t => t.name === name)) return;
+    touren.push({ id: uid(), name,
+      stops: liste.map(s => ({ id: uid(), name: s[0], lat: s[1], lng: s[2], done: false })) });
+  };
+  anlegen("Vormittagstour Wangen", [
+    ["Baumannstraße 82/80",              47.6856544, 9.8186097],
+    ["August-Lämmle-Weg 21",             47.6892047, 9.8210435],
+    ["Maria-Knöpfler-Straße 19",         47.6940455, 9.8183430],
+    ["August-Braun-Straße 9",            47.7006065, 9.8242834],
+    ["August-Braun-Straße 17",           47.7004671, 9.8236916],
+    ["Franz-Joseph-Spiegler-Straße 17",  47.7007976, 9.8259556],
+    ["Karl-Speidel-Straße 5",            47.6937496, 9.8311269]
+  ]);
+  anlegen("Mittagstour 12:20 Uhr", [
+    ["Leutkirch, Tautenhofer Berg 14",   47.8052770, 9.9731947],
+    ["Bad Wurzach, Erlenweg 12",         47.8934942, 9.9705005],
+    ["Aichstetten, Inselstraße 16",      47.8963108, 10.0785455],
+    ["Aichstetten, Lärchenstraße 5",     47.9000997, 10.0813651],
+    ["Aitrach, Oberhausen 2",            47.9209604, 10.0810802]
+  ]);
+  anlegen("Nachmittagstour 15:20 Uhr", [
+    ["Karl-Speidel-Straße 5",            47.6937496, 9.8311269],
+    ["August-Braun-Straße 9",            47.7006065, 9.8242834],
+    ["August-Braun-Straße 17",           47.7004671, 9.8236916],
+    ["Franz-Joseph-Spiegler-Straße 17",  47.7007976, 9.8259556],
+    ["Maria-Knöpfler-Straße 19",         47.6940455, 9.8183430],
+    ["August-Lämmle-Weg 21",             47.6892047, 9.8210435],
+    ["Baumannstraße 82/80",              47.6856544, 9.8186097]
+  ]);
+  store.set("sf_v12touren", true);
+  store.set("sf_touren", touren);
+}
+
+$("neueTourBtn").addEventListener("click", () => {
+  const name = prompt("Name der Tour (z. B. 'Morgentour Grundschule'):");
+  if (!name || !name.trim()) return;
+  touren.push({ id: uid(), name: name.trim(), stops: [] });
+  speichereTouren();
+});
+
+function zeichneTouren(){
+  const ziel = $("tourListe");
+  if (touren.length === 0){ ziel.innerHTML = "<div class='leer'>Noch keine Touren.<br>Lege oben deine erste Tour mit Haltestellen an.</div>"; return; }
+  ziel.innerHTML = "";
+  touren.forEach(t => {
+    const div = document.createElement("div");
+    div.className = "zeile";
+    const fertig = t.stops.filter(s => s.done).length;
+    div.innerHTML =
+      "<div class='kopf'><span style='font-size:20px;'>📋</span><div style='flex:1;'>" +
+      "<div class='titel'>" + t.name + "</div>" +
+      "<div class='sub'>" + t.stops.length + " Haltestellen · " + fertig + " erledigt</div></div>" +
+      "<button class='btn hell klein' data-a='stop'>＋ Halt</button>" +
+      "<button class='btn rot klein' data-a='del'>🗑</button></div>" +
+      "<div style='display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;'>" +
+      "<button class='btn gelb klein' data-a='start' style='flex:1 1 100%;'>▶ Tour starten – Halt für Halt</button>" +
+      "<button class='btn klein' data-a='route' style='flex:1;'>🗺️ Route zeigen</button>" +
+      "<button class='btn hell klein' data-a='navi' style='flex:1;'>🧭 Alle Halte in Maps</button></div>" +
+      "<div class='stops'></div>" +
+      (t.stops.some(s => s.done) ? "<button class='btn hell klein' data-a='reset' style='margin-top:10px;'>↺ Häkchen zurücksetzen</button>" : "");
+    const stopsDiv = div.querySelector(".stops");
+    t.stops.forEach(s => {
+      const z = document.createElement("div");
+      z.className = "stopZeile";
+      z.innerHTML =
+        "<input type='checkbox' " + (s.done ? "checked" : "") + ">" +
+        "<span class='sname " + (s.done ? "done" : "") + "'>🚏 " + s.name + "</span>" +
+        "<button class='btn klein' title='Navigation starten'>🧭 Navi</button>" +
+        "<button class='btn hell klein' title='Halt löschen'>🗑</button>";
+      z.querySelector("input").onchange = ev => { s.done = ev.target.checked; speichereTouren(); };
+      z.querySelector("button[title='Navigation starten']").onclick = () =>
+        window.open("https://www.google.com/maps/dir/?api=1&destination=" + s.lat + "," + s.lng + "&travelmode=driving", "_blank", "noopener,noreferrer");
+      z.querySelector("button[title='Halt löschen']").onclick = () => {
+        if (!confirm("Haltestelle '" + s.name + "' löschen?")) return;
+        t.stops = t.stops.filter(x => x.id !== s.id); speichereTouren();
+      };
+      stopsDiv.appendChild(z);
+    });
+    div.querySelector("[data-a='stop']").onclick = () => {
+      const name = prompt("Name der Haltestelle (z. B. 'Hauptstraße / Kirche'):");
+      if (!name || !name.trim()) return;
+      ortWaehlen("Wo liegt „" + name.trim() + "“?", ll => {
+        t.stops.push({ id: uid(), name: name.trim(), lat: ll[0], lng: ll[1], done: false });
+        speichereTouren();
+        banner("Haltestelle gespeichert ✅");
+        zeige("auftraege");
+      });
+    };
+    div.querySelector("[data-a='start']").onclick = () => tourNaviStarten(t);
+    div.querySelector("[data-a='route']").onclick = () => tourRouteZeigen(t);
+    div.querySelector("[data-a='navi']").onclick = () => tourNaviAlle(t);
+    div.querySelector("[data-a='del']").onclick = () => {
+      if (!confirm("Tour '" + t.name + "' komplett löschen?")) return;
+      touren = touren.filter(x => x.id !== t.id); speichereTouren();
+    };
+    const resetBtn = div.querySelector("[data-a='reset']");
+    if (resetBtn) resetBtn.onclick = () => { t.stops.forEach(s => s.done = false); speichereTouren(); };
+    ziel.appendChild(div);
+  });
+}
+function fuelleTourWahl(){
+  const sel = $("tourWahl"), alt = sel.value;
+  sel.innerHTML = "<option value=''>Ohne Tour</option>" +
+    touren.map(t => "<option value='" + t.id + "'>" + t.name + "</option>").join("");
+  sel.value = touren.some(t => t.id === alt) ? alt : "";
+}
+$("tourWahl").addEventListener("change", zeichneStops);
+
+/* ================= Zonen ================= */
+function speichereZonen(){ store.set("sf_zonen", zonen); zeichneZonenListe(); zeichneZonen(); }
+
+$("neueZoneBtn").addEventListener("click", () => {
+  const name = prompt("Name der Zone (z. B. 'Schule', 'Depot'):");
+  if (!name || !name.trim()) return;
+  let radius = parseInt(prompt("Radius in Metern (z. B. 200):", "200"), 10);
+  if (!radius || radius < 20) radius = 200;
+  ortWaehlen("Wo liegt die Zone „" + name.trim() + "“?", ll => {
+    zonen.push({ id: uid(), name: name.trim(), radius, lat: ll[0], lng: ll[1] });
+    if (aktiveFahrt) zonenStatus[zonen[zonen.length-1].id] = false;
+    speichereZonen();
+    banner("Zone gespeichert ✅");
+    zeige("mehr");
+  });
+});
+function zeichneZonenListe(){
+  const ziel = $("zonenListe");
+  if (zonen.length === 0){ ziel.innerHTML = "<div class='leer'>Noch keine Zonen.</div>"; return; }
+  ziel.innerHTML = "";
+  zonen.forEach(z => {
+    const div = document.createElement("div");
+    div.className = "zeile";
+    div.innerHTML = "<div class='kopf'><span style='font-size:18px;'>🚧</span>" +
+      "<div style='flex:1;'><div class='titel'>" + z.name + "</div><div class='sub'>Radius " + z.radius + " m</div></div>" +
+      "<button class='btn hell klein' data-a='karte'>🗺️</button>" +
+      "<button class='btn rot klein' data-a='del'>🗑</button></div>";
+    div.querySelector("[data-a='karte']").onclick = () => { zeige("karte"); map.setView([z.lat, z.lng], 15); };
+    div.querySelector("[data-a='del']").onclick = () => {
+      if (!confirm("Zone '" + z.name + "' löschen?")) return;
+      zonen = zonen.filter(x => x.id !== z.id); speichereZonen();
+    };
+    ziel.appendChild(div);
+  });
+}
+
+/* ================= Fahrtenbuch ================= */
+function zeichneFahrtenbuch(){
+  const gesamtKm = trips.reduce((s, t) => s + (t.km || 0), 0);
+  const gesamtZeit = trips.reduce((s, t) => s + (t.ende - t.start), 0);
+  const heute = summe(tripsImZeitraum(tagesAnfang()));
+  const monat = summe(tripsImZeitraum(monatsAnfang()));
+  const monatName = new Date().toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+  $("fbSumme").innerHTML =
+    "Heute: <b>" + heute.km.toFixed(1).replace(".", ",") + " km</b> · <b>" + fmtDauer(heute.zeit) + "</b> Fahrzeit<br>" +
+    monatName + ": <b>" + monat.km.toFixed(1).replace(".", ",") + " km</b> · <b>" + fmtDauer(monat.zeit) + "</b> Fahrzeit<br>" +
+    "<span style='color:var(--text2);'>Insgesamt: " + trips.length + " Fahrten · " + gesamtKm.toFixed(1).replace(".", ",") +
+    " km · " + fmtDauer(gesamtZeit) + "</span>";
+  const ziel = $("tripListe");
+  if (trips.length === 0){ ziel.innerHTML = "<div class='leer'>Noch keine Fahrten aufgezeichnet.<br>Starte deine erste Fahrt im Tab „Fahrt“.</div>"; return; }
+  ziel.innerHTML = "";
+  trips.forEach(t => {
+    const div = document.createElement("div");
+    div.className = "zeile";
+    div.innerHTML =
+      "<div class='kopf' style='cursor:pointer;'><span style='font-size:20px;'>🚌</span><div style='flex:1;'>" +
+      "<div class='titel'>" + fmtDatum(t.start) + "</div>" +
+      "<div class='sub'>" + fmtZeit(t.start) + " – " + fmtZeit(t.ende) + " Uhr · " + fmtDauer(t.ende - t.start) +
+      " · " + (t.km || 0).toFixed(1) + " km" + (t.tourName ? " · " + t.tourName : "") + "</div></div>" +
+      "<span class='pfeil'>▸</span></div>" +
+      "<div class='detail hidden'>" +
+      (t.ereignisse && t.ereignisse.length
+        ? t.ereignisse.map(e => "<div class='ereignis'><b>" + fmtZeit(e.t) + "</b> – " + e.typ + " " + e.zone + "</div>").join("")
+        : "<div class='ereignis'>Keine Zonen-Ereignisse.</div>") +
+      (t.protokoll && t.protokoll.length
+        ? "<div class='ereignis' style='margin-top:4px;'><b>📍 Standort-Protokoll (" + t.protokoll.length + " Einträge):</b></div>" +
+          t.protokoll.map(p => "<div class='ereignis'><b>" + fmtZeit(p.t) + "</b> – km-Stand: " +
+            p.km.toFixed(1).replace(".", ",") + " km (Monat: " + p.kmMonat.toFixed(1).replace(".", ",") + " km)</div>").join("")
+        : "") +
+      "<div style='display:flex; gap:8px; margin-top:10px;'>" +
+      "<button class='btn hell klein' data-a='karte'>🗺️ Route zeigen</button>" +
+      "<button class='btn rot klein' data-a='del'>🗑 Löschen</button></div></div>";
+    div.querySelector(".kopf").onclick = () => {
+      const d = div.querySelector(".detail");
+      d.classList.toggle("hidden");
+      div.querySelector(".pfeil").textContent = d.classList.contains("hidden") ? "▸" : "▾";
+    };
+    div.querySelector("[data-a='karte']").onclick = () => {
+      if (!t.punkte || t.punkte.length < 2){ banner("Für diese Fahrt wurden zu wenige GPS-Punkte gespeichert."); return; }
+      zeige("karte"); zeigePfad(t.punkte, t.protokoll);
+    };
+    div.querySelector("[data-a='del']").onclick = () => {
+      if (!confirm("Diese Fahrt aus dem Fahrtenbuch löschen?")) return;
+      trips = trips.filter(x => x.id !== t.id);
+      store.set("sf_trips", trips); zeichneFahrtenbuch();
+    };
+    ziel.appendChild(div);
+  });
+}
+
+$("csvBtn").addEventListener("click", () => {
+  if (trips.length === 0){ banner("Noch keine Fahrten vorhanden."); return; }
+  const zeilen = [["Datum","Start","Ende","Dauer","Strecke (km)","km-Stand Monat","Tour","Ereignisse","Standort-Protokoll"].join(";")];
+  trips.forEach(t => {
+    const ev = (t.ereignisse || []).map(e => fmtZeit(e.t) + " " + e.typ + " " + e.zone).join(" | ");
+    const prot = (t.protokoll || []).map(p => fmtZeit(p.t) + " km " + p.km.toFixed(1).replace(".", ",")).join(" | ");
+    const kmMonat = t.kmMonatStart != null ? ((t.kmMonatStart + (t.km || 0)).toFixed(1).replace(".", ",")) : "";
+    zeilen.push([
+      new Date(t.start).toLocaleDateString("de-DE"),
+      fmtZeit(t.start), fmtZeit(t.ende), fmtDauer(t.ende - t.start),
+      (t.km || 0).toFixed(2).replace(".", ","),
+      kmMonat,
+      t.tourName || "", ev, prot
+    ].map(x => '"' + String(x).replace(/"/g, '""') + '"').join(";"));
+  });
+  const blob = new Blob(["﻿" + zeilen.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "fahrtenbuch_" + new Date().toISOString().slice(0, 10) + ".csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+/* ================= Tour-Navi Halt für Halt (Neu in 1.4) ================= */
+let tourLauf = store.get("sf_tourlauf", null); // {tourId}
+function naviZuStop(s){
+  window.open("https://www.google.com/maps/dir/?api=1&destination=" + s.lat + "," + s.lng + "&travelmode=driving", "_blank", "noopener,noreferrer");
+}
+function naechsterOffenerStop(t){ return t.stops.find(s => !s.done); }
+function tourNaviStarten(t){
+  if (!t.stops.length){ banner("Diese Tour hat noch keine Haltestellen."); return; }
+  if (t.stops.every(s => s.done) ||
+      (t.stops.some(s => s.done) && confirm("Häkchen zurücksetzen und die Tour von vorne beginnen?"))){
+    t.stops.forEach(s => s.done = false);
+  }
+  tourLauf = { tourId: t.id };
+  store.set("sf_tourlauf", tourLauf);
+  speichereTouren();
+  zeichneTourNavi();
+  const s = naechsterOffenerStop(t);
+  banner("🧭 Tour gestartet – Halt 1: " + s.name);
+  naviZuStop(s);
+}
+function tourNaviErledigt(){
+  if (!tourLauf) return;
+  const t = touren.find(x => x.id === tourLauf.tourId);
+  if (!t){ tourNaviBeenden(true); return; }
+  const s = naechsterOffenerStop(t);
+  if (s){ s.done = true; speichereTouren(); }
+  const n = naechsterOffenerStop(t);
+  if (n){
+    banner("✅ Erledigt! Weiter zu Halt " + (t.stops.indexOf(n) + 1) + ": " + n.name);
+    naviZuStop(n);
+  } else {
+    melden("🎉 Tour „" + t.name + "“ beendet – alle Halte erledigt!");
+    tourNaviBeenden(true);
+  }
+  zeichneTourNavi();
+}
+function tourNaviBeenden(leise){
+  tourLauf = null; store.del("sf_tourlauf");
+  zeichneTourNavi();
+  if (!leise) banner("Tour-Navi beendet.");
+}
+function zeichneTourNavi(){
+  const ziel = $("tourNaviCard");
+  if (!tourLauf){ ziel.classList.add("hidden"); return; }
+  const t = touren.find(x => x.id === tourLauf.tourId);
+  const s = t ? naechsterOffenerStop(t) : null;
+  if (!t || !s){ tourNaviBeenden(true); return; }
+  const nr = t.stops.indexOf(s) + 1;
+  ziel.classList.remove("hidden");
+  ziel.innerHTML =
+    "<h2>🧭 Tour läuft: " + t.name + "</h2>" +
+    "<div style='font-size:17px; margin-bottom:4px;'>Nächster Halt <b>" + nr + " von " + t.stops.length + "</b>:</div>" +
+    "<div style='font-size:19px; font-weight:800; margin-bottom:10px;'>🚏 " + s.name + "</div>" +
+    "<button class='btn gelb voll' id='tnErledigt' style='margin-bottom:8px;'>✅ Halt erledigt → nächster Halt</button>" +
+    "<div style='display:flex; gap:8px;'>" +
+    "<button class='btn hell klein' id='tnNavi' style='flex:1;'>🧭 Navi zu diesem Halt</button>" +
+    "<button class='btn rot klein' id='tnStop'>⏹ Beenden</button></div>";
+  $("tnErledigt").onclick = tourNaviErledigt;
+  $("tnNavi").onclick = () => naviZuStop(s);
+  $("tnStop").onclick = () => { if (confirm("Tour-Navi wirklich beenden?")) tourNaviBeenden(); };
+}
+/* GPS-Ankunft: wenn du näher als 60 m am nächsten Halt bist, wird er automatisch abgehakt */
+let letzteAnkunft = 0;
+function tourLaufGps(lat, lng){
+  if (!tourLauf || Date.now() - letzteAnkunft < 20000) return;
+  const t = touren.find(x => x.id === tourLauf.tourId);
+  if (!t) return;
+  const s = naechsterOffenerStop(t);
+  if (!s) return;
+  if (haversine([lat, lng], [s.lat, s.lng]) < 60){
+    letzteAnkunft = Date.now();
+    s.done = true; speichereTouren();
+    const n = naechsterOffenerStop(t);
+    if (n) melden("🚏 Halt erreicht: " + s.name + " ✅ Nächster: " + n.name);
+    else { melden("🎉 Tour „" + t.name + "“ beendet – alle Halte erledigt!"); tourNaviBeenden(true); }
+    zeichneTourNavi();
+  }
+}
+
+/* ================= Telefon-Liste (Neu in 1.4) ================= */
+let anrufe = store.get("sf_anrufe", []);
+let telLaufend = store.get("sf_tellauf", null), telTimerInt = null;
+function telAnzeigeStart(){
+  $("telLaufend").classList.remove("hidden");
+  $("telStartKnoepfe").classList.add("hidden");
+  clearInterval(telTimerInt);
+  telTimerInt = setInterval(() => {
+    if (!telLaufend) return;
+    const s = Math.floor((Date.now() - telLaufend.start) / 1000);
+    $("telTimer").textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }, 500);
+}
+function telStart(richtung){
+  const nr = $("telNummer").value.trim();
+  if (!nr){ banner("Bitte zuerst die Telefonnummer eintippen."); return; }
+  telLaufend = { start: Date.now(), nummer: nr, richtung };
+  store.set("sf_tellauf", telLaufend);
+  telAnzeigeStart();
+  if (richtung === "Ausgehend"){
+    try{ window.location.href = "tel:" + nr.replace(/[^+\d]/g, ""); }catch(e){}
+  }
+  banner((richtung === "Eingehend" ? "📥" : "📤") + " Anruf läuft – Gesprächszeit wird gestoppt");
+}
+function telEnde(){
+  if (!telLaufend) return;
+  clearInterval(telTimerInt); telTimerInt = null;
+  anrufe.unshift({ t: telLaufend.start, nummer: telLaufend.nummer, richtung: telLaufend.richtung, dauer: Date.now() - telLaufend.start });
+  store.set("sf_anrufe", anrufe);
+  telLaufend = null; store.del("sf_tellauf");
+  $("telLaufend").classList.add("hidden");
+  $("telStartKnoepfe").classList.remove("hidden");
+  $("telNummer").value = "";
+  zeichneAnrufe();
+  banner("📞 Anruf gespeichert ✅");
+}
+function fmtGespraech(ms){
+  const s = Math.floor(ms / 1000);
+  return Math.floor(s / 60) + " min " + (s % 60) + " s";
+}
+function zeichneAnrufe(){
+  const ziel = $("telListe");
+  if (anrufe.length === 0){ ziel.innerHTML = "<div class='leer'>Noch keine Anrufe gespeichert.</div>"; return; }
+  ziel.innerHTML = "";
+  anrufe.forEach(a => {
+    const div = document.createElement("div");
+    div.className = "zeile";
+    div.innerHTML =
+      "<div class='kopf'><span style='font-size:18px;'>" + (a.richtung === "Eingehend" ? "📥" : "📤") + "</span>" +
+      "<div style='flex:1;'><div class='titel'>" + a.nummer + "</div>" +
+      "<div class='sub'>" + fmtDatum(a.t) + " · " + fmtZeit(a.t) + " Uhr · " + a.richtung + " · " + fmtGespraech(a.dauer) + "</div></div>" +
+      "<button class='btn rot klein' data-a='del'>🗑</button></div>";
+    div.querySelector("[data-a='del']").onclick = () => {
+      if (!confirm("Diesen Anruf aus der Liste löschen?")) return;
+      anrufe = anrufe.filter(x => x !== a);
+      store.set("sf_anrufe", anrufe); zeichneAnrufe();
+    };
+    ziel.appendChild(div);
+  });
+}
+$("telEinBtn").addEventListener("click", () => telStart("Eingehend"));
+$("telAusBtn").addEventListener("click", () => telStart("Ausgehend"));
+$("telEndeBtn").addEventListener("click", telEnde);
+$("telCsvBtn").addEventListener("click", () => {
+  if (anrufe.length === 0){ banner("Noch keine Anrufe vorhanden."); return; }
+  const zeilen = ["Datum;Uhrzeit;Nummer;Richtung;Gespraechszeit"];
+  anrufe.forEach(a => zeilen.push([
+    new Date(a.t).toLocaleDateString("de-DE"), fmtZeit(a.t), a.nummer, a.richtung, fmtGespraech(a.dauer)
+  ].map(x => '"' + String(x).replace(/"/g, '""') + '"').join(";")));
+  const blob = new Blob(["﻿" + zeilen.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a2 = document.createElement("a");
+  a2.href = URL.createObjectURL(blob);
+  a2.download = "telefonliste_" + new Date().toISOString().slice(0, 10) + ".csv";
+  a2.click();
+  URL.revokeObjectURL(a2.href);
+});
+
+/* ================= Kilometer-Blatt (Neu in 1.2) ================= */
+function zeitraumVon(start){
+  const h = new Date(start).getHours();
+  if (h < 11) return "Vormittag";
+  if (h < 14) return "Mittag";
+  return "Nachmittag";
+}
+function kilometerEintragen(f){
+  kmBlatt.push({
+    t: f.start,
+    zeitraum: zeitraumVon(f.start),
+    tour: f.tourName || "",
+    km: Math.round((f.km || 0) * 10) / 10
+  });
+  store.set("sf_kmblatt", kmBlatt);
+  zeichneKmBlatt();
+}
+function monatsName(t){ return new Date(t).toLocaleDateString("de-DE", { month: "long", year: "numeric" }); }
+function zeichneKmBlatt(){
+  const ziel = $("kmBlattListe");
+  if (kmBlatt.length === 0){ ziel.innerHTML = "<div class='leer'>Noch keine Einträge.<br>Drücke nach der Fahrt auf ⏹ Stop.</div>"; return; }
+  // Nach Monaten gruppieren, neuester zuerst
+  const gruppen = {};
+  kmBlatt.forEach(e => { const m = monatsName(e.t); (gruppen[m] = gruppen[m] || []).push(e); });
+  let html = "";
+  Object.keys(gruppen).reverse().forEach(m => {
+    const liste = gruppen[m];
+    const summe = liste.reduce((s, e) => s + e.km, 0);
+    html += "<div style='font-weight:700; margin-top:8px;'>" + m + " · gesamt " + summe.toFixed(1).replace(".", ",") + " km</div>";
+    liste.slice().reverse().forEach(e => {
+      html += "<div class='ereignis'><b>" + new Date(e.t).toLocaleDateString("de-DE", {weekday:"short", day:"2-digit", month:"2-digit"}) +
+        "</b> · " + e.zeitraum + (e.tour ? " · " + e.tour : "") + " · <b>" + e.km.toFixed(1).replace(".", ",") + " km</b></div>";
+    });
+  });
+  ziel.innerHTML = html;
+}
+function kmBlattCsv(){
+  const zeilen = ["Datum;Zeitraum;Tour;Kilometer"];
+  kmBlatt.forEach(e => {
+    zeilen.push([
+      new Date(e.t).toLocaleDateString("de-DE"),
+      e.zeitraum, e.tour,
+      e.km.toFixed(1).replace(".", ",")
+    ].map(x => '"' + String(x).replace(/"/g, '""') + '"').join(";"));
+  });
+  zeilen.push("");
+  const gruppen = {};
+  kmBlatt.forEach(e => { const m = monatsName(e.t); gruppen[m] = (gruppen[m] || 0) + e.km; });
+  Object.keys(gruppen).forEach(m => zeilen.push('"Summe ' + m + '";;;"' + gruppen[m].toFixed(1).replace(".", ",") + '"'));
+  return "﻿" + zeilen.join("\r\n");
+}
+/* Datei-Merker: die App merkt sich die gewählte Datei (z. B. Desktop → Köhler-App → Kilometer.csv) */
+function idbOeffnen(){
+  return new Promise((res, rej) => {
+    const r = indexedDB.open("sf_dateien", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("h");
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function dateiMerken(h){
+  try{
+    const db = await idbOeffnen();
+    await new Promise((res, rej) => {
+      const tx = db.transaction("h", "readwrite");
+      tx.objectStore("h").put(h, "kilometer");
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+  }catch(e){}
+}
+async function gemerkteDatei(){
+  try{
+    const db = await idbOeffnen();
+    return await new Promise(res => {
+      const g = db.transaction("h").objectStore("h").get("kilometer");
+      g.onsuccess = () => res(g.result || null);
+      g.onerror = () => res(null);
+    });
+  }catch(e){ return null; }
+}
+$("kmBlattSpeichernBtn").addEventListener("click", async () => {
+  if (kmBlatt.length === 0){ banner("Noch keine Einträge im Kilometer-Blatt."); return; }
+  const csv = kmBlattCsv();
+  if (window.showSaveFilePicker){ // PC: direkt in die Datei im Ordner „Köhler App" schreiben
+    try{
+      let h = await gemerkteDatei();
+      if (h){
+        const ok = await h.requestPermission({ mode: "readwrite" });
+        if (ok !== "granted") h = null;
+      }
+      if (!h){
+        h = await window.showSaveFilePicker({
+          suggestedName: "Kilometer.csv",
+          types: [{ description: "Kilometer-Blatt (CSV für Excel)", accept: { "text/csv": [".csv"] } }]
+        });
+        await dateiMerken(h);
+      }
+      const w = await h.createWritable();
+      await w.write(csv); await w.close();
+      banner("💾 Blatt „Kilometer“ gespeichert ✅");
+      return;
+    }catch(e){ if (e && e.name === "AbortError") return; }
+  }
+  // Handy oder ältere Browser: Datei herunterladen
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "Kilometer.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  banner("💾 Kilometer.csv heruntergeladen ✅");
+});
+$("kmBlattLoeschenBtn").addEventListener("click", () => {
+  if (kmBlatt.length === 0){ banner("Das Kilometer-Blatt ist schon leer."); return; }
+  if (!confirm("Alle Einträge im Kilometer-Blatt löschen?\n\nVorher mit 💾 speichern nicht vergessen!")) return;
+  kmBlatt = [];
+  store.set("sf_kmblatt", kmBlatt);
+  zeichneKmBlatt();
+  banner("Kilometer-Blatt geleert 🗑");
+});
+
+/* ================= Konto ================= */
+$("logoutBtn").addEventListener("click", () => location.reload());
+$("resetBtn").addEventListener("click", () => {
+  if (!confirm("Wirklich ALLE Daten löschen (Fahrten, Touren, Zonen, Konto)?")) return;
+  if (!confirm("Letzte Warnung – das kann nicht rückgängig gemacht werden!")) return;
+  localStorage.clear(); location.reload();
+});
+
+/* ================= Start ================= */
+function appStart(){
+  $("loginScreen").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  $("profilInfo").innerHTML = "Angemeldet als <b>" + profil.name + "</b>";
+  karteInit();
+  v12TourenAnlegen(); // Neu in 1.2: feste Touren beim ersten Start anlegen
+  fuelleTourWahl();
+  zeichneTouren(); zeichneZonenListe(); zeichneFahrtenbuch(); zeichneKmBlatt();
+  zeichneTourNavi(); zeichneAnrufe();
+  if (telLaufend){ telAnzeigeStart(); } // laufenden Anruf nach Neustart weiterzählen
+  uhrTick(); uhrTimer = setInterval(uhrTick, 1000);
+  if (aktiveFahrt){ // App wurde während einer Fahrt neu geladen → weiter aufzeichnen
+    if (!aktiveFahrt.protokoll) aktiveFahrt.protokoll = []; // Fahrt aus Version 1.0 übernehmen
+    if (aktiveFahrt.kmMonatStart == null) aktiveFahrt.kmMonatStart = summe(tripsImZeitraum(monatsAnfang())).km;
+    zonenStatus = {}; zonen.forEach(z => zonenStatus[z.id] = false);
+    zeichneProtokoll(aktiveFahrt.protokoll);
+    gpsStarten(); wakeLockAnfordern();
+    banner("Laufende Fahrt fortgesetzt (Start " + fmtZeit(aktiveFahrt.start) + ")");
+  }
+  fahrtUiAktualisieren();
+  statistikAnzeigen();
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")){
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+}
+</script>
+</body>
+</html>

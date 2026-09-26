@@ -1,9 +1,10 @@
 /* Service Worker: macht die App-Oberfläche offline nutzbar (Kartenkacheln brauchen weiterhin Internet).
    Strategie: erst Netzwerk (damit Updates sofort ankommen), bei Offline-Betrieb aus dem Cache. */
-const CACHE = "schulbus-fahrer-v5"; // Version 1.4
+const CACHE = "schulbus-fahrer-v6"; // Umbau 2.0 Schritt 1: Landing ist Startseite, App unter app.html
 const DATEIEN = [
   "./",
   "./index.html",
+  "./app.html",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",

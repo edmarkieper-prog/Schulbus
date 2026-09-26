@@ -3,7 +3,7 @@
   "short_name": "Fahrer",
   "description": "Fahrtenbuch, GPS-Aufzeichnung, Touren und Geofencing für Schulbusfahrer",
   "lang": "de",
-  "start_url": "./",
+  "start_url": "./app.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
