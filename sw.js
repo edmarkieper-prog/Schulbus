@@ -1,6 +1,6 @@
 /* Service Worker: macht die App-Oberfläche offline nutzbar (Kartenkacheln brauchen weiterhin Internet).
    Strategie: erst Netzwerk (damit Updates sofort ankommen), bei Offline-Betrieb aus dem Cache. */
-const CACHE = "schulbus-fahrer-v6"; // Umbau 2.0 Schritt 1: Landing ist Startseite, App unter app.html
+const CACHE = "schulbus-fahrer-v7"; // Version 2.0: Cloud-Konto (Firebase)
 const DATEIEN = [
   "./",
   "./index.html",
@@ -8,6 +8,9 @@ const DATEIEN = [
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
+  "./lib/firebase-app-compat.js",
+  "./lib/firebase-auth-compat.js",
+  "./lib/firebase-firestore-compat.js",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
 ];
@@ -26,8 +29,8 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return;
-  // Kartenkacheln und Adresssuche nie anfassen
-  if (url.hostname.includes("openstreetmap.org")) return;
+  // Kartenkacheln, Adresssuche und Google-Server (Anmeldung/Datenbank) nie anfassen
+  if (url.hostname.includes("openstreetmap.org") || url.hostname.endsWith("googleapis.com")) return;
   e.respondWith(
     fetch(e.request).then(antwort => {
       if (antwort.ok && (url.origin === location.origin || url.hostname === "unpkg.com")){

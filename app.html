@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://unpkg.com; connect-src 'self' https://nominatim.openstreetmap.org https://tile.openstreetmap.org https://unpkg.com https://router.project-osrm.org; worker-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://unpkg.com; connect-src 'self' https://nominatim.openstreetmap.org https://tile.openstreetmap.org https://unpkg.com https://router.project-osrm.org https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://www.googleapis.com; worker-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#1e3a5f">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -176,14 +176,16 @@
 <div id="loginScreen">
   <div class="logo">🚌</div>
   <h1>Schulbus Fahrer</h1>
-  <p id="loginText">Anmelden</p>
+  <p id="loginText">Einen Moment…</p>
   <form id="loginForm">
-    <input type="text" id="loginName" placeholder="Dein Name" autocomplete="name">
-    <input type="password" id="loginPin" placeholder="PIN (4-stellig)" inputmode="numeric" maxlength="8">
-    <input type="password" id="loginPin2" placeholder="PIN wiederholen" inputmode="numeric" maxlength="8" class="hidden">
+    <input type="email" id="loginEmail" placeholder="E-Mail-Adresse" autocomplete="username" inputmode="email">
+    <input type="password" id="loginPw" placeholder="Passwort" autocomplete="current-password">
     <button type="submit" id="loginBtn">Anmelden</button>
     <div id="loginError"></div>
   </form>
+  <p style="margin-top:18px; font-size:13px; color:#8fa3bd; max-width:320px; text-align:center;">
+    Private App – eine Registrierung ist nicht möglich.
+  </p>
 </div>
 
 <!-- ============ APP ============ -->
@@ -318,8 +320,13 @@
       <div class="card">
         <h2>Info</h2>
         <p style="font-size:14px; color:var(--text2);">
-          Alle Daten werden nur auf diesem Gerät gespeichert. <b>Version 1.4</b><br><br>
-          Neu in 1.4:<br>
+          <b>Version 2.0 – mit Cloud-Konto</b><br><br>
+          Neu in 2.0:<br>
+          • Anmeldung mit E-Mail + Passwort – nur dein Konto hat Zugriff<br>
+          • ☁️ Handy und PC zeigen dieselben Daten (Fahrten, Touren, Kilometer-Blatt, Anrufe)<br>
+          • Funktioniert weiter offline und gleicht sich später von selbst ab<br>
+          • Die Landing Page ist jetzt die Startseite, die App liegt geschützt dahinter<br><br>
+          Aus Version 1.4:<br>
           • ▶ „Tour starten“: das Navi ruft die Halte automatisch nacheinander auf (1 → 2 → 3 …) bis die Tour fertig ist<br>
           • GPS-Ankunft: erreichst du einen Halt, wird er von selbst abgehakt<br>
           • 📞 Neuer Tab „Telefon“: Anrufe mit Datum, Uhrzeit, Nummer, Richtung und Gesprächszeit festhalten, mit CSV-Export<br><br>
@@ -353,13 +360,16 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+<script src="lib/firebase-app-compat.js"></script>
+<script src="lib/firebase-auth-compat.js"></script>
+<script src="lib/firebase-firestore-compat.js"></script>
 <script>
 "use strict";
 /* ================= Speicher ================= */
 const store = {
   get(k, d){ try{ const v = JSON.parse(localStorage.getItem(k)); return v === null || v === undefined ? d : v; }catch(e){ return d; } },
-  set(k, v){ localStorage.setItem(k, JSON.stringify(v)); },
-  del(k){ localStorage.removeItem(k); }
+  set(k, v){ localStorage.setItem(k, JSON.stringify(v)); cloudSchreiben(k, v); },
+  del(k){ localStorage.removeItem(k); cloudSchreiben(k, null); }
 };
 let profil  = store.get("sf_profil", null);
 let trips   = store.get("sf_trips", []);
@@ -403,37 +413,181 @@ function haversine(a, b){ // Meter zwischen [lat,lng]-Punkten
   const q = Math.sin(dLat/2)**2 + Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(dLng/2)**2;
   return 2*R*Math.asin(Math.sqrt(q));
 }
-async function hashPin(pin){
-  if (crypto.subtle){
-    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("sf|"+pin));
-    return [...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,"0")).join("");
+/* ================= Cloud-Konto (Firebase, Version 2.0) =================
+   Anmeldung mit E-Mail + Passwort. Alle wichtigen Daten liegen zusätzlich in
+   der eigenen Firestore-Datenbank, damit Handy und PC dasselbe zeigen.
+   Nur auf dem Gerät bleiben: laufende Fahrt / Tour / Anruf (sf_aktiv, sf_tourlauf, sf_tellauf). */
+firebase.initializeApp({
+  apiKey: "AIzaSyAfWWpW_3S4hlD6xl-e4Yub9NqZ29Pofn4",
+  authDomain: "schulbus-fahrer.firebaseapp.com",
+  projectId: "schulbus-fahrer",
+  storageBucket: "schulbus-fahrer.firebasestorage.app",
+  messagingSenderId: "786168484813",
+  appId: "1:786168484813:web:bb26c85d21621bdb252a84"
+});
+const auth = firebase.auth();
+const db = firebase.firestore();
+auth.languageCode = "de";
+
+const CLOUD_KEYS = ["sf_profil", "sf_touren", "sf_zonen", "sf_kmblatt", "sf_anrufe"]; // je ein Cloud-Dokument
+let cloudBereit = false, cloudBasis = null;
+let stempel = store.get("sf_stempel", {});          // wann jeder Schlüssel zuletzt HIER geändert wurde
+let cloudTripStand = {};                            // Fahrt-Id → JSON, wie sie zuletzt in der Cloud stand
+
+function cloudSchreiben(k, v){
+  if (!cloudBereit) return;
+  try{
+    if (k === "sf_trips"){ fahrtenAbgleichen(v || []); return; }
+    if (!CLOUD_KEYS.includes(k)) return;
+    stempel[k] = Date.now();
+    localStorage.setItem("sf_stempel", JSON.stringify(stempel));
+    const ref = cloudBasis.collection("daten").doc(k);
+    (v === null ? ref.delete() : ref.set({ v: JSON.stringify(v), t: stempel[k] })).catch(() => {});
+  }catch(e){}
+}
+function fahrtenAbgleichen(liste){
+  const jetzt = {};
+  liste.forEach(f => { jetzt[f.id] = JSON.stringify(f); });
+  Object.keys(jetzt).forEach(id => {
+    if (cloudTripStand[id] !== jetzt[id]){
+      cloudBasis.collection("fahrten").doc(id).set({ v: jetzt[id], t: Date.now() }).catch(() => {});
+      cloudTripStand[id] = jetzt[id];
+    }
+  });
+  Object.keys(cloudTripStand).forEach(id => {
+    if (!jetzt[id]){
+      cloudBasis.collection("fahrten").doc(id).delete().catch(() => {});
+      delete cloudTripStand[id];
+    }
+  });
+}
+/* Daten aus der Cloud übernehmen (ohne sie gleich wieder hochzuschicken) */
+function uebernehmen(k, wert, t){
+  localStorage.setItem(k, JSON.stringify(wert));
+  stempel[k] = t;
+  localStorage.setItem("sf_stempel", JSON.stringify(stempel));
+  if (k === "sf_profil") profil = wert;
+  if (k === "sf_touren") touren = wert;
+  if (k === "sf_zonen")  zonen = wert;
+  if (k === "sf_kmblatt") kmBlatt = wert;
+  if (k === "sf_anrufe") anrufe = wert;
+}
+function neuZeichnen(){
+  try{
+    fuelleTourWahl(); zeichneTouren(); zeichneStops(); zeichneZonenListe(); zeichneZonen();
+    zeichneFahrtenbuch(); zeichneKmBlatt(); zeichneAnrufe(); zeichneTourNavi(); statistikAnzeigen();
+  }catch(e){}
+}
+async function cloudStart(user){
+  try{ await db.enablePersistence({ synchronizeTabs: true }); }catch(e){} // Offline-Speicher (klappt nicht in jedem Browser – nicht schlimm)
+  cloudBasis = db.collection("nutzer").doc(user.uid);
+  try{
+    /* ---- Erstabgleich ---- */
+    const [datenSnap, fahrtenSnap] = await Promise.all([
+      cloudBasis.collection("daten").get(),
+      cloudBasis.collection("fahrten").get()
+    ]);
+    const cloudDaten = {};
+    datenSnap.forEach(d => { cloudDaten[d.id] = d.data(); });
+    const meinStart = Date.now();
+    CLOUD_KEYS.forEach(k => {
+      const lokal = store.get(k, null), fern = cloudDaten[k];
+      if (fern && (!lokal || (stempel[k] || 0) < fern.t) && !(lokal && !stempel[k])){
+        try{ uebernehmen(k, JSON.parse(fern.v), fern.t); }catch(e){}
+      }
+    });
+    /* Fahrten: Vereinigung aus Cloud und Gerät */
+    const cloudFahrten = {};
+    fahrtenSnap.forEach(d => { cloudFahrten[d.id] = d.data(); });
+    Object.keys(cloudFahrten).forEach(id => {
+      cloudTripStand[id] = cloudFahrten[id].v;
+      if (!trips.some(f => f.id === id)){
+        try{ trips.push(JSON.parse(cloudFahrten[id].v)); }catch(e){}
+      }
+    });
+    trips.sort((a, b) => b.start - a.start);
+    localStorage.setItem("sf_trips", JSON.stringify(trips));
+    cloudBereit = true;
+    /* Was es nur hier gibt, jetzt hochschicken */
+    CLOUD_KEYS.forEach(k => {
+      const lokal = store.get(k, null);
+      if (lokal !== null && (!cloudDaten[k] || (stempel[k] || meinStart) >= cloudDaten[k].t)) cloudSchreiben(k, lokal);
+    });
+    fahrtenAbgleichen(trips);
+    neuZeichnen();
+    /* ---- Ab jetzt: live auf Änderungen vom anderen Gerät hören ---- */
+    cloudBasis.collection("daten").onSnapshot(snap => {
+      let geaendert = false;
+      snap.docChanges().forEach(ch => {
+        if (ch.type === "removed") return;
+        const k = ch.doc.id, d = ch.doc.data();
+        if (!CLOUD_KEYS.includes(k) || d.t <= (stempel[k] || 0)) return;
+        try{ uebernehmen(k, JSON.parse(d.v), d.t); geaendert = true; }catch(e){}
+      });
+      if (geaendert) neuZeichnen();
+    }, () => {});
+    cloudBasis.collection("fahrten").onSnapshot(snap => {
+      let geaendert = false;
+      snap.docChanges().forEach(ch => {
+        const id = ch.doc.id;
+        if (ch.type === "removed"){
+          if (cloudTripStand[id] !== undefined){ delete cloudTripStand[id]; }
+          const n = trips.length;
+          trips = trips.filter(f => f.id !== id);
+          if (trips.length !== n) geaendert = true;
+          return;
+        }
+        const d = ch.doc.data();
+        if (cloudTripStand[id] === d.v) return; // das waren wir selbst
+        cloudTripStand[id] = d.v;
+        try{
+          const f = JSON.parse(d.v), i = trips.findIndex(x => x.id === id);
+          if (i >= 0) trips[i] = f; else trips.push(f);
+          geaendert = true;
+        }catch(e){}
+      });
+      if (geaendert){
+        trips.sort((a, b) => b.start - a.start);
+        localStorage.setItem("sf_trips", JSON.stringify(trips));
+        neuZeichnen();
+      }
+    }, () => {});
+  }catch(e){ // offline oder Regeln fehlen noch: App läuft lokal weiter
+    cloudBereit = false;
+    banner("⚠️ Cloud gerade nicht erreichbar – Daten bleiben erstmal auf diesem Gerät.");
   }
-  let h = 5381; for (const c of "sf|"+pin) h = ((h*33) ^ c.charCodeAt(0)) >>> 0;
-  return "x"+h.toString(16);
 }
 
 /* ================= Login ================= */
-const neuRegistrieren = !profil;
-if (neuRegistrieren){
-  $("loginText").textContent = "Willkommen! Lege deinen Namen und eine PIN fest.";
-  $("loginPin2").classList.remove("hidden");
-  $("loginBtn").textContent = "Konto anlegen";
-} else {
-  $("loginName").value = profil.name;
-}
+let appGestartet = false;
+try{ $("loginEmail").value = localStorage.getItem("sf_email") || ""; }catch(e){}
+auth.onAuthStateChanged(user => {
+  if (user){
+    if (!appGestartet){
+      appGestartet = true;
+      cloudStart(user);
+      appStart();
+    }
+  } else {
+    $("loginText").textContent = "Mit deinem Konto anmelden";
+  }
+});
 $("loginForm").addEventListener("submit", async e => {
   e.preventDefault();
-  const name = $("loginName").value.trim(), pin = $("loginPin").value.trim();
-  if (!name || pin.length < 4){ $("loginError").textContent = "Bitte Name und mindestens 4-stellige PIN eingeben."; return; }
-  if (!profil){
-    if (pin !== $("loginPin2").value.trim()){ $("loginError").textContent = "Die PINs stimmen nicht überein."; return; }
-    profil = { name, pinHash: await hashPin(pin), seit: Date.now() };
-    store.set("sf_profil", profil);
-    appStart();
-  } else {
-    if (await hashPin(pin) === profil.pinHash){ appStart(); }
-    else { $("loginError").textContent = "Falsche PIN."; }
+  const email = $("loginEmail").value.trim(), pw = $("loginPw").value;
+  if (!email || !pw){ $("loginError").textContent = "Bitte E-Mail und Passwort eingeben."; return; }
+  $("loginBtn").disabled = true; $("loginBtn").textContent = "Wird geprüft…";
+  try{
+    await auth.signInWithEmailAndPassword(email, pw);
+    try{ localStorage.setItem("sf_email", email); }catch(e2){}
+  }catch(err){
+    const code = (err && err.code) || "";
+    $("loginError").textContent =
+      code.includes("network") ? "Keine Internetverbindung – bitte später nochmal." :
+      code.includes("too-many") ? "Zu viele Versuche – bitte ein paar Minuten warten." :
+      "E-Mail oder Passwort ist falsch.";
   }
+  $("loginBtn").disabled = false; $("loginBtn").textContent = "Anmelden";
 });
 
 /* ================= Ansichten ================= */
@@ -1286,10 +1440,14 @@ $("kmBlattLoeschenBtn").addEventListener("click", () => {
 });
 
 /* ================= Konto ================= */
-$("logoutBtn").addEventListener("click", () => location.reload());
-$("resetBtn").addEventListener("click", () => {
-  if (!confirm("Wirklich ALLE Daten löschen (Fahrten, Touren, Zonen, Konto)?")) return;
-  if (!confirm("Letzte Warnung – das kann nicht rückgängig gemacht werden!")) return;
+$("logoutBtn").addEventListener("click", async () => {
+  if (!confirm("Wirklich abmelden?")) return;
+  try{ await auth.signOut(); }catch(e){}
+  location.reload();
+});
+$("resetBtn").addEventListener("click", async () => {
+  if (!confirm("Alle Daten auf DIESEM Gerät löschen?\n\nDeine Cloud-Daten bleiben erhalten und kommen nach der nächsten Anmeldung automatisch zurück.")) return;
+  try{ await auth.signOut(); }catch(e){}
   localStorage.clear(); location.reload();
 });
 
@@ -1297,7 +1455,7 @@ $("resetBtn").addEventListener("click", () => {
 function appStart(){
   $("loginScreen").classList.add("hidden");
   $("app").classList.remove("hidden");
-  $("profilInfo").innerHTML = "Angemeldet als <b>" + profil.name + "</b>";
+  $("profilInfo").innerHTML = "Angemeldet als <b>" + ((auth.currentUser && auth.currentUser.email) || "…") + "</b><br><span style='font-size:13px; color:var(--text2);'>Deine Daten werden zwischen Handy und PC abgeglichen ☁️</span>";
   karteInit();
   v12TourenAnlegen(); // Neu in 1.2: feste Touren beim ersten Start anlegen
   fuelleTourWahl();
