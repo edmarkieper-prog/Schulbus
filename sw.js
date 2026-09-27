@@ -1,6 +1,6 @@
 /* Service Worker: macht die App-Oberfläche offline nutzbar (Kartenkacheln brauchen weiterhin Internet).
    Strategie: erst Netzwerk (damit Updates sofort ankommen), bei Offline-Betrieb aus dem Cache. */
-const CACHE = "schulbus-fahrer-v11"; // neues Logo
+const CACHE = "schulbus-fahrer-v12"; // Passwort ändern
 const DATEIEN = [
   "./",
   "./index.html",

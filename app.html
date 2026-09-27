@@ -350,8 +350,22 @@
       <div class="card">
         <h2>Konto</h2>
         <div id="profilInfo" style="margin-bottom:10px;"></div>
-        <button class="btn hell klein" id="logoutBtn">Abmelden</button>
-        <button class="btn rot klein" id="resetBtn" style="margin-left:8px;">Alle Daten löschen</button>
+        <button class="btn hell klein" id="pwAendernBtn">🔑 Passwort ändern</button>
+        <form id="pwForm" class="hidden" style="margin:12px 0 4px;">
+          <div class="feld"><label for="pwAlt">Aktuelles Passwort</label>
+            <input type="password" id="pwAlt" autocomplete="current-password"></div>
+          <div class="feld"><label for="pwNeu">Neues Passwort (mindestens 8 Zeichen)</label>
+            <input type="password" id="pwNeu" autocomplete="new-password"></div>
+          <div class="feld"><label for="pwNeu2">Neues Passwort wiederholen</label>
+            <input type="password" id="pwNeu2" autocomplete="new-password"></div>
+          <div id="pwFehler" style="color:var(--rot); font-size:14px; min-height:20px; margin-bottom:8px;"></div>
+          <button type="submit" class="btn gelb klein" id="pwSpeichernBtn">Neues Passwort speichern</button>
+          <button type="button" class="btn hell klein" id="pwAbbrechenBtn" style="margin-left:8px;">Abbrechen</button>
+        </form>
+        <div style="margin-top:10px;">
+          <button class="btn hell klein" id="logoutBtn">Abmelden</button>
+          <button class="btn rot klein" id="resetBtn" style="margin-left:8px;">Alle Daten löschen</button>
+        </div>
       </div>
       <div class="card">
         <h2>Info</h2>
@@ -1718,6 +1732,43 @@ $("kmBlattLoeschenBtn").addEventListener("click", () => {
 });
 
 /* ================= Konto ================= */
+function pwFormZu(){
+  $("pwForm").classList.add("hidden"); $("pwForm").reset();
+  $("pwFehler").textContent = ""; $("pwAendernBtn").classList.remove("hidden");
+}
+$("pwAendernBtn").addEventListener("click", () => {
+  $("pwForm").classList.remove("hidden"); $("pwAendernBtn").classList.add("hidden");
+  $("pwAlt").focus();
+});
+$("pwAbbrechenBtn").addEventListener("click", pwFormZu);
+$("pwForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const alt = $("pwAlt").value, neu = $("pwNeu").value, neu2 = $("pwNeu2").value;
+  const fehler = t => { $("pwFehler").textContent = t; };
+  if (!alt || !neu || !neu2) return fehler("Bitte alle drei Felder ausfüllen.");
+  if (neu.length < 8) return fehler("Das neue Passwort muss mindestens 8 Zeichen haben.");
+  if (neu !== neu2) return fehler("Die beiden neuen Passwörter stimmen nicht überein.");
+  if (neu === alt) return fehler("Das neue Passwort ist gleich dem alten.");
+  const user = auth.currentUser;
+  if (!user || !user.email) return fehler("Du bist nicht angemeldet.");
+  $("pwSpeichernBtn").disabled = true; $("pwSpeichernBtn").textContent = "Wird gespeichert…";
+  try{
+    // Firebase verlangt eine frische Anmeldung, bevor das Passwort geändert werden darf
+    await user.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(user.email, alt));
+    await user.updatePassword(neu);
+    pwFormZu();
+    banner("🔑 Passwort geändert ✅");
+  }catch(err){
+    const code = (err && err.code) || "";
+    fehler(
+      code.includes("wrong-password") || code.includes("invalid-credential") || code.includes("invalid-login") ? "Das aktuelle Passwort ist falsch." :
+      code.includes("weak-password") ? "Das neue Passwort ist zu schwach – bitte ein längeres wählen." :
+      code.includes("too-many") ? "Zu viele Versuche – bitte ein paar Minuten warten." :
+      code.includes("network") ? "Keine Internetverbindung – bitte später nochmal." :
+      "Das hat nicht geklappt – bitte später nochmal versuchen.");
+  }
+  $("pwSpeichernBtn").disabled = false; $("pwSpeichernBtn").textContent = "Neues Passwort speichern";
+});
 $("logoutBtn").addEventListener("click", async () => {
   if (!confirm("Wirklich abmelden?")) return;
   try{ await auth.signOut(); }catch(e){}
