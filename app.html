@@ -168,6 +168,22 @@
   #modal .knoepfe .btn{flex:1;}
   .suchErg{padding:10px; border:1px solid var(--rand); border-radius:8px; margin-top:8px; font-size:14px; cursor:pointer;}
   .suchErg:hover{background:var(--bg);}
+
+  /* Druckansicht (Neu in 2.2): beim Drucken wird nur der Druckbereich gezeigt */
+  #druckBereich{display:none;}
+  @media print{
+    body{background:#fff; height:auto;}
+    #app, #loginScreen, #banner, #modalWrap{display:none !important;}
+    #druckBereich{display:block; color:#000; font-size:13px; padding:10px;}
+    #druckBereich h1{font-size:20px; margin-bottom:2px;}
+    #druckBereich .unter{color:#333; margin-bottom:12px;}
+    #druckBereich table{width:100%; border-collapse:collapse; margin-top:8px;}
+    #druckBereich th, #druckBereich td{border:1px solid #000; padding:5px 7px; text-align:left;}
+    #druckBereich th{background:#eee;}
+    #druckBereich tr.fehlt td{font-weight:800;}
+    #druckBereich .summen{margin-top:10px; font-weight:700;}
+    #druckBereich .unterschrift{margin-top:48px; border-top:1px solid #000; width:280px; padding-top:4px; font-size:12px;}
+  }
 </style>
 </head>
 <body>
@@ -291,6 +307,7 @@
         <div id="kmBlattListe"></div>
         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
           <button class="btn klein" id="kmBlattSpeichernBtn">💾 Blatt „Kilometer" speichern</button>
+          <button class="btn hell klein" id="kmBlattDruckBtn">🖨️ Drucken</button>
           <button class="btn rot klein" id="kmBlattLoeschenBtn">🗑 Alles löschen</button>
         </div>
         <p style="font-size:12px; color:var(--text2); margin-top:8px;">
@@ -304,6 +321,7 @@
         <div id="anwListe"></div>
         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
           <button class="btn hell klein" id="anwCsvBtn">⬇ Als CSV exportieren</button>
+          <button class="btn hell klein" id="anwDruckBtn">🖨️ Drucken</button>
           <button class="btn rot klein" id="anwLoeschenBtn">🗑 Alles löschen</button>
         </div>
         <p style="font-size:12px; color:var(--text2); margin-top:8px;">
@@ -337,8 +355,10 @@
       <div class="card">
         <h2>Info</h2>
         <p style="font-size:14px; color:var(--text2);">
-          <b>Version 2.1</b><br><br>
-          Neu in 2.1:<br>
+          <b>Version 2.2</b><br><br>
+          Neu in 2.2:<br>
+          • 🖨️ Kilometer-Blatt und Anwesenheit direkt vom Handy drucken oder als PDF speichern – mit Unterschriften-Zeile für die Abgabe<br><br>
+          Aus Version 2.1:<br>
           • ✏️ Tour-Editor: Halte mit ▲▼ umsortieren, bearbeiten (Name, geplante Uhrzeit, Position), Touren umbenennen und kopieren – keine störenden Eingabefenster mehr<br>
           • 🧒 Schüler-Anwesenheit: Kinder pro Halt eintragen; beim Abhaken eines Halts fragt die App, wer eingestiegen ist – mit Fehlliste und Export im Fahrtenbuch<br>
           • 📄 Kilometer-Blatt wird jetzt als echte Excel-Datei (.xlsx) gespeichert<br><br>
@@ -378,6 +398,7 @@
 
 <div id="banner"></div>
 <div id="modalWrap" class="hidden"><div id="modal"></div></div>
+<div id="druckBereich"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
@@ -1664,6 +1685,64 @@ $("kmBlattSpeichernBtn").addEventListener("click", async () => {
   XLSX.writeFile(wb, "Kilometer.xlsx");
   banner("💾 Kilometer.xlsx heruntergeladen ✅");
 });
+/* ================= Drucken (Neu in 2.2) ================= */
+function drucken(titel, inhaltHtml){
+  const d = $("druckBereich");
+  d.innerHTML =
+    "<h1>🚌 " + esc(titel) + "</h1>" +
+    "<div class='unter'>Fahrer: " + esc((auth.currentUser && auth.currentUser.email) || "") +
+    " · erstellt am " + new Date().toLocaleDateString("de-DE") + ", " + fmtZeit(Date.now()) + " Uhr</div>" +
+    inhaltHtml +
+    "<div class='unterschrift'>Datum, Unterschrift Fahrer</div>";
+  const alterTitel = document.title;
+  document.title = titel.replace(/[^\wäöüÄÖÜß-]+/g, "-") + "-" + new Date().toISOString().slice(0, 10);
+  window.print();
+  setTimeout(() => { document.title = alterTitel; d.innerHTML = ""; }, 2000);
+}
+$("kmBlattDruckBtn").addEventListener("click", () => {
+  if (kmBlatt.length === 0){ banner("Noch keine Einträge im Kilometer-Blatt."); return; }
+  const sortiert = [...kmBlatt].sort((a, b) => a.t - b.t);
+  let html = "<table><tr><th>Datum</th><th>Zeitraum</th><th>Tour</th><th>Kilometer</th></tr>";
+  sortiert.forEach(e => {
+    html += "<tr><td>" + new Date(e.t).toLocaleDateString("de-DE") + "</td><td>" + esc(e.zeitraum) +
+      "</td><td>" + esc(e.tour) + "</td><td>" + e.km.toFixed(1).replace(".", ",") + "</td></tr>";
+  });
+  html += "</table>";
+  const gruppen = {};
+  kmBlatt.forEach(e => { const m = monatsName(e.t); gruppen[m] = (gruppen[m] || 0) + e.km; });
+  html += "<div class='summen'>" + Object.keys(gruppen).map(m =>
+    "Summe " + m + ": " + gruppen[m].toFixed(1).replace(".", ",") + " km").join("<br>") + "</div>";
+  drucken("Kilometer-Blatt", html);
+});
+$("anwDruckBtn").addEventListener("click", () => {
+  if (!anwesenheit.length){ banner("Noch keine Anwesenheits-Einträge."); return; }
+  modal(
+    "<h3>🖨️ Was soll gedruckt werden?</h3>" +
+    "<button class='btn voll gelb' id='adNurFehl' style='margin-bottom:10px;'>❌ Nur die Fehlliste</button>" +
+    "<button class='btn voll' id='adAlles'>📋 Komplette Liste (letzte 31 Tage)</button>" +
+    "<div class='knoepfe'><button class='btn hell' id='adAbbruch'>Abbrechen</button></div>"
+  );
+  $("adAbbruch").onclick = modalZu;
+  $("adNurFehl").onclick = () => { modalZu(); anwDrucken(anwesenheit.filter(a => !a.da), "Fehlliste Anwesenheit"); };
+  $("adAlles").onclick = () => {
+    modalZu();
+    anwDrucken(anwesenheit.filter(a => Date.now() - a.t < 31 * 24 * 3600 * 1000), "Anwesenheitsliste");
+  };
+});
+function anwDrucken(liste, titel){
+  if (!liste.length){ banner("Dafür gibt es keine Einträge."); return; }
+  const sortiert = [...liste].sort((a, b) => a.t - b.t);
+  let html = "<table><tr><th>Datum</th><th>Uhrzeit</th><th>Tour</th><th>Haltestelle</th><th>Kind</th><th>Status</th></tr>";
+  sortiert.forEach(a => {
+    html += "<tr" + (a.da ? "" : " class='fehlt'") + "><td>" + new Date(a.t).toLocaleDateString("de-DE") +
+      "</td><td>" + fmtZeit(a.t) + "</td><td>" + esc(a.tour) + "</td><td>" + esc(a.halt) +
+      "</td><td>" + esc(a.kind) + "</td><td>" + (a.da ? "da" : "FEHLT") + "</td></tr>";
+  });
+  html += "</table><div class='summen'>" + liste.length + " Einträge · davon " +
+    liste.filter(a => !a.da).length + "× gefehlt</div>";
+  drucken(titel, html);
+}
+
 $("kmBlattLoeschenBtn").addEventListener("click", () => {
   if (kmBlatt.length === 0){ banner("Das Kilometer-Blatt ist schon leer."); return; }
   if (!confirm("Alle Einträge im Kilometer-Blatt löschen?\n\nVorher mit 💾 speichern nicht vergessen!")) return;
