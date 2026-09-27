@@ -1,2 +1,3 @@
-﻿.claude/
-schulbus-fahrer.zip
+.claude/
+*.zip
+touren-backup.json

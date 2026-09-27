@@ -357,7 +357,8 @@
         <p style="font-size:14px; color:var(--text2);">
           <b>Version 2.2</b><br><br>
           Neu in 2.2:<br>
-          • 🖨️ Kilometer-Blatt und Anwesenheit direkt vom Handy drucken oder als PDF speichern – mit Unterschriften-Zeile für die Abgabe<br><br>
+          • 🖨️ Kilometer-Blatt und Anwesenheit direkt vom Handy drucken oder als PDF speichern – mit Unterschriften-Zeile für die Abgabe<br>
+          • 🔒 Datenschutz: Touren stecken nicht mehr im Programmcode, sondern kommen nur noch aus deinem eigenen Cloud-Konto<br><br>
           Aus Version 2.1:<br>
           • ✏️ Tour-Editor: Halte mit ▲▼ umsortieren, bearbeiten (Name, geplante Uhrzeit, Position), Touren umbenennen und kopieren – keine störenden Eingabefenster mehr<br>
           • 🧒 Schüler-Anwesenheit: Kinder pro Halt eintragen; beim Abhaken eines Halts fragt die App, wer eingestiegen ist – mit Fehlliste und Export im Fahrtenbuch<br>
@@ -1015,43 +1016,6 @@ function ortWaehlen(titel, weiter){
 
 /* ================= Aufträge / Touren ================= */
 function speichereTouren(){ store.set("sf_touren", touren); zeichneTouren(); fuelleTourWahl(); zeichneStops(); }
-
-/* Neu in 1.2: die drei festen Touren werden beim ersten Start automatisch angelegt */
-function v12TourenAnlegen(){
-  if (store.get("sf_v12touren", false)) return;
-  const anlegen = (name, liste) => {
-    if (touren.some(t => t.name === name)) return;
-    touren.push({ id: uid(), name,
-      stops: liste.map(s => ({ id: uid(), name: s[0], lat: s[1], lng: s[2], done: false })) });
-  };
-  anlegen("Vormittagstour Wangen", [
-    ["Baumannstraße 82/80",              47.6856544, 9.8186097],
-    ["August-Lämmle-Weg 21",             47.6892047, 9.8210435],
-    ["Maria-Knöpfler-Straße 19",         47.6940455, 9.8183430],
-    ["August-Braun-Straße 9",            47.7006065, 9.8242834],
-    ["August-Braun-Straße 17",           47.7004671, 9.8236916],
-    ["Franz-Joseph-Spiegler-Straße 17",  47.7007976, 9.8259556],
-    ["Karl-Speidel-Straße 5",            47.6937496, 9.8311269]
-  ]);
-  anlegen("Mittagstour 12:20 Uhr", [
-    ["Leutkirch, Tautenhofer Berg 14",   47.8052770, 9.9731947],
-    ["Bad Wurzach, Erlenweg 12",         47.8934942, 9.9705005],
-    ["Aichstetten, Inselstraße 16",      47.8963108, 10.0785455],
-    ["Aichstetten, Lärchenstraße 5",     47.9000997, 10.0813651],
-    ["Aitrach, Oberhausen 2",            47.9209604, 10.0810802]
-  ]);
-  anlegen("Nachmittagstour 15:20 Uhr", [
-    ["Karl-Speidel-Straße 5",            47.6937496, 9.8311269],
-    ["August-Braun-Straße 9",            47.7006065, 9.8242834],
-    ["August-Braun-Straße 17",           47.7004671, 9.8236916],
-    ["Franz-Joseph-Spiegler-Straße 17",  47.7007976, 9.8259556],
-    ["Maria-Knöpfler-Straße 19",         47.6940455, 9.8183430],
-    ["August-Lämmle-Weg 21",             47.6892047, 9.8210435],
-    ["Baumannstraße 82/80",              47.6856544, 9.8186097]
-  ]);
-  store.set("sf_v12touren", true);
-  store.set("sf_touren", touren);
-}
 
 $("neueTourBtn").addEventListener("click", () => {
   formModal("📋 Neue Tour", [{ id: "name", label: "Name der Tour", ph: "z. B. Morgentour Grundschule" }], w => {
@@ -1770,7 +1734,6 @@ function appStart(){
   $("app").classList.remove("hidden");
   $("profilInfo").innerHTML = "Angemeldet als <b>" + ((auth.currentUser && auth.currentUser.email) || "…") + "</b><br><span style='font-size:13px; color:var(--text2);'>Deine Daten werden zwischen Handy und PC abgeglichen ☁️</span>";
   karteInit();
-  v12TourenAnlegen(); // Neu in 1.2: feste Touren beim ersten Start anlegen
   fuelleTourWahl();
   zeichneTouren(); zeichneZonenListe(); zeichneFahrtenbuch(); zeichneKmBlatt();
   zeichneTourNavi(); zeichneAnrufe(); zeichneAnwesenheit();
