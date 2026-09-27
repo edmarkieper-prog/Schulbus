@@ -1,6 +1,6 @@
 /* Service Worker: macht die App-Oberfläche offline nutzbar (Kartenkacheln brauchen weiterhin Internet).
    Strategie: erst Netzwerk (damit Updates sofort ankommen), bei Offline-Betrieb aus dem Cache. */
-const CACHE = "schulbus-fahrer-v10"; // Version 2.2: Kaufen-Bereich, Touren nur noch aus der Cloud
+const CACHE = "schulbus-fahrer-v11"; // neues Logo
 const DATEIEN = [
   "./",
   "./index.html",
@@ -8,6 +8,9 @@ const DATEIEN = [
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
+  "./icon-maskable-512.png",
+  "./apple-touch-icon.png",
+  "./logo.svg",
   "./lib/firebase-app-compat.js",
   "./lib/firebase-auth-compat.js",
   "./lib/firebase-firestore-compat.js",

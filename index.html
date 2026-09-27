@@ -6,8 +6,9 @@
 <meta name="theme-color" content="#1e3a5f">
 <meta name="description" content="Schulbus Fahrer – die Web-App für Schulbusfahrer: Fahrtenbuch mit GPS-Aufzeichnung, Touren, Karte, Geofencing und CSV-Export. Läuft auf Android, iPhone und PC.">
 <title>Schulbus Fahrer – Fahrtenbuch &amp; Touren-App für Schulbusfahrer</title>
-<link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.json">
 <script>
   // Installierte App (Startbildschirm) soll nicht die Landing Page sehen, sondern direkt die App
@@ -34,13 +35,13 @@
   /* ---------- Hero ---------- */
   .hero{
     background:linear-gradient(160deg, var(--blau) 0%, var(--blau-dunkel) 100%);
-    color:#fff; padding:56px 0 64px; text-align:center; position:relative; overflow:hidden;
+    color:#fff; padding:76px 0 64px; text-align:center; position:relative; overflow:hidden;
   }
   .hero::after{
     content:""; position:absolute; left:0; right:0; bottom:0; height:6px;
     background:repeating-linear-gradient(45deg, var(--gelb) 0 18px, var(--blau-dunkel) 18px 36px);
   }
-  .hero .icon{width:96px; height:96px; margin:0 auto 18px; border-radius:22px; box-shadow:0 8px 30px rgba(0,0,0,.35);}
+  .hero .icon{position:absolute; top:14px; right:16px; width:52px; height:52px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,.35); z-index:1;}
   .hero h1{font-size:clamp(28px, 5vw, 44px); font-weight:800; letter-spacing:-.5px;}
   .hero .sub{
     color:#b8c7dc; font-size:clamp(16px, 2.5vw, 20px); max-width:620px; margin:12px auto 30px;
@@ -128,7 +129,7 @@
 
 <header class="hero">
   <div class="wrap">
-    <img class="icon" src="icon-192.png" alt="Schulbus Fahrer App-Icon" width="96" height="96">
+    <img class="icon" src="logo.svg" alt="Schulbus Fahrer Logo" width="52" height="52">
     <h1>Schulbus Fahrer</h1>
     <p class="sub">Fahrtenbuch mit GPS-Aufzeichnung, Touren, Karte und Geofencing –
     die App für Schulbusfahrer. Direkt im Browser, keine Installation aus dem App&nbsp;Store nötig.</p>
