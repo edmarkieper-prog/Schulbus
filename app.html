@@ -393,8 +393,10 @@
       <div class="card">
         <h2>Info</h2>
         <p style="font-size:14px; color:var(--text2);">
-          <b>Version 2.4</b><br><br>
-          Neu in 2.4:<br>
+          <b>Version 2.5</b><br><br>
+          Neu in 2.5:<br>
+          • 📊 Das ausgefüllte Original-Formular gibt es jetzt auch als Excel-Datei (Fahrtenbuch → 📋 Original-Formular → Monat wählen → „Als Excel-Datei speichern")<br><br>
+          Aus Version 2.4:<br>
           • 📋 „Original-Formular drucken": das Fahrtenbuch-Formular deines Arbeitgebers (Tag 1–31, vormittags/nachmittags, Gesamt-km) wird automatisch mit deinen Kilometern ausgefüllt – Monat wählen, drucken, unterschreiben, abgeben<br>
           • Die Kopf-Angaben dafür (Name, Wohnort, Einrichtung, Kennzeichen, Tour-Nr.) trägst du einmalig unter Mehr → Formular-Angaben ein<br><br>
           Aus Version 2.3:<br>
@@ -1834,11 +1836,20 @@ $("kmFormularBtn").addEventListener("click", () => {
   $("foAbbruch").onclick = modalZu;
   document.querySelectorAll(".foMonat").forEach(b => b.onclick = () => {
     const [j, m] = b.dataset.k.split("-").map(Number);
-    modalZu();
-    formularDrucken(j, m);
+    const monatText = new Date(j, m, 1).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+    modal(
+      "<h3>📋 Formular für " + monatText + "</h3>" +
+      "<button class='btn voll gelb' id='foDrucken' style='margin-bottom:10px;'>🖨️ Drucken / als PDF</button>" +
+      "<button class='btn voll' id='foExcel'>📊 Als Excel-Datei speichern</button>" +
+      "<div class='knoepfe'><button class='btn hell' id='foZurueck'>Abbrechen</button></div>"
+    );
+    $("foZurueck").onclick = modalZu;
+    $("foDrucken").onclick = () => { modalZu(); formularDrucken(j, m); };
+    $("foExcel").onclick = () => { modalZu(); formularExcelSpeichern(j, m); };
   });
 });
-function formularDrucken(jahr, monat){
+/* Daten für das Original-Formular: pro Tag vormittags/nachmittags (Mittag zählt zu nachmittags) */
+function formularDaten(jahr, monat){
   const tage = {};
   kmBlatt.forEach(e => {
     const d = new Date(e.t);
@@ -1846,9 +1857,40 @@ function formularDrucken(jahr, monat){
     const tag = d.getDate();
     tage[tag] = tage[tag] || { vm: 0, nm: 0 };
     if (e.zeitraum === "Vormittag") tage[tag].vm += e.km;
-    else tage[tag].nm += e.km; // Mittag + Nachmittag zählen zu "nachmittags"
+    else tage[tag].nm += e.km;
   });
-  const monatText = new Date(jahr, monat, 1).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+  let gesamt = 0;
+  Object.keys(tage).forEach(t => { gesamt += tage[t].vm + tage[t].nm; });
+  return { tage, gesamt, monatText: new Date(jahr, monat, 1).toLocaleDateString("de-DE", { month: "long", year: "numeric" }) };
+}
+/* Neu in 2.5: das ausgefüllte Original-Formular als Excel-Datei */
+function formularExcelSpeichern(jahr, monat){
+  const { tage, gesamt, monatText } = formularDaten(jahr, monat);
+  const zeilen = [
+    ["Fahrtenbuch", "", "Fahrer (Name, Vorname):", formular.name || ""],
+    ["für Monat:", monatText, "Wohnort:", formular.wohnort || ""],
+    ["Tour-Nr.:", formular.tourNr || "", "Kennzeichen:", formular.kennzeichen || ""],
+    ["Einrichtung:", formular.einrichtung || "", "", ""],
+    [],
+    ["Tag", "", "Kilometerleistung", "Grund für Änderung der Kilometerleistung"]
+  ];
+  for (let t = 1; t <= 31; t++){
+    const e = tage[t] || { vm: 0, nm: 0 };
+    zeilen.push([t, "vormittags", e.vm > 0 ? Math.round(e.vm * 10) / 10 : "", ""]);
+    zeilen.push(["", "nachmittags", e.nm > 0 ? Math.round(e.nm * 10) / 10 : "", ""]);
+  }
+  zeilen.push(["", "Gesamt-km", Math.round(gesamt * 10) / 10, ""]);
+  const ws = XLSX.utils.aoa_to_sheet(zeilen);
+  ws["!cols"] = [{ wch: 6 }, { wch: 14 }, { wch: 17 }, { wch: 46 }];
+  ws["!merges"] = [];
+  for (let t = 0; t < 31; t++) ws["!merges"].push({ s: { r: 6 + t * 2, c: 0 }, e: { r: 7 + t * 2, c: 0 } });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Fahrtenbuch");
+  XLSX.writeFile(wb, "Fahrtenbuch-" + monatText.replace(" ", "-") + ".xlsx");
+  banner("📊 Excel-Formular „Fahrtenbuch " + monatText + "“ gespeichert ✅");
+}
+function formularDrucken(jahr, monat){
+  const { tage, gesamt, monatText } = formularDaten(jahr, monat);
   const kopf = seite =>
     "<div class='foKopf'>" +
     "<div style='font-size:16px;'><b>Fahrtenbuch</b> &nbsp;Seite " + seite + "</div>" +
@@ -1869,8 +1911,6 @@ function formularDrucken(jahr, monat){
     }
     return h;
   };
-  let gesamt = 0;
-  Object.keys(tage).forEach(t => { gesamt += tage[t].vm + tage[t].nm; });
   const html =
     kopf(1) + zeilen(1, 19) + "</table>" +
     "<div class='blatt2'>" + kopf(2) + zeilen(20, 31) +
