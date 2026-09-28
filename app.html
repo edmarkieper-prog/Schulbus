@@ -393,8 +393,10 @@
       <div class="card">
         <h2>Info</h2>
         <p style="font-size:14px; color:var(--text2);">
-          <b>Version 2.5</b><br><br>
-          Neu in 2.5:<br>
+          <b>Version 2.6</b><br><br>
+          Neu in 2.6:<br>
+          • ⏹ Stop-Vorschlag: Ist der letzte Halt (Endpunkt) deiner Tour abgehakt, fragt die App von selbst, ob sie die Fahrt beenden und die Kilometer eintragen soll – ein Tipp auf OK genügt<br><br>
+          Aus Version 2.5:<br>
           • 📊 Das ausgefüllte Original-Formular gibt es jetzt auch als Excel-Datei (Fahrtenbuch → 📋 Original-Formular → Monat wählen → „Als Excel-Datei speichern")<br><br>
           Aus Version 2.4:<br>
           • 📋 „Original-Formular drucken": das Fahrtenbuch-Formular deines Arbeitgebers (Tag 1–31, vormittags/nachmittags, Gesamt-km) wird automatisch mit deinen Kilometern ausgefüllt – Monat wählen, drucken, unterschreiben, abgeben<br>
@@ -871,8 +873,8 @@ function fahrtStarten(){
   banner("Fahrt gestartet um " + fmtZeit(aktiveFahrt.start) + " ✅");
 }
 
-function fahrtBeenden(){
-  if (!confirm("⏹ Stop – Fahrt beenden und Kilometer ins Kilometer-Blatt eintragen?")) return;
+function fahrtBeenden(ohneFrage){
+  if (!ohneFrage && !confirm("⏹ Stop – Fahrt beenden und Kilometer ins Kilometer-Blatt eintragen?")) return;
   gpsStoppen();
   aktiveFahrt.ende = Date.now();
   aktiveFahrt.km = Math.round(aktiveFahrt.km * 100) / 100;
@@ -945,6 +947,16 @@ function tourStartPruefen(lat, lng){
 function tourStartBeiHalt(t, s){ // falls GPS ungenau ist: Abhaken von Halt 1 startet die Messung auch
   if (!aktiveFahrt || aktiveFahrt.tourStart || aktiveFahrt.tourId !== t.id) return;
   if (t.stops.length && t.stops[0].id === s.id) tourStartSetzen();
+}
+/* Neu in 2.6: Ist die Tour am Endpunkt fertig, schlägt die App den ⏹ Stop von selbst vor */
+function stopVorschlagen(t){
+  if (!aktiveFahrt || aktiveFahrt.tourId !== t.id) return;
+  if (!t.stops.length || !t.stops.every(s => s.done)) return;
+  setTimeout(() => {
+    if (aktiveFahrt && confirm("🎉 Tour „" + t.name + "“ ist fertig.\n\n⏹ Fahrt jetzt beenden und die Kilometer ins Kilometer-Blatt eintragen?")){
+      fahrtBeenden(true);
+    }
+  }, 800);
 }
 function tourStatsAnzeigen(){
   const karte = $("tourStatsCard");
@@ -1157,6 +1169,7 @@ function zeichneTouren(){
         speichereTouren();
         if (s.done) tourStartBeiHalt(t, s); // Neu in 2.3
         if (s.done && s.kinder && s.kinder.length) anwesenheitAbfragen(t, s);
+        if (s.done) stopVorschlagen(t); // Neu in 2.6
       };
       z.querySelector("[data-b='hoch']").onclick = () => {
         if (i <= 0) return;
@@ -1514,6 +1527,7 @@ function tourNaviErledigt(){
   zeichneTourNavi();
   if (s) tourStartBeiHalt(t, s); // Neu in 2.3
   if (s && s.kinder && s.kinder.length) anwesenheitAbfragen(t, s); // Neu in 2.1
+  stopVorschlagen(t); // Neu in 2.6
 }
 function tourNaviBeenden(leise){
   tourLauf = null; store.del("sf_tourlauf");
@@ -1557,6 +1571,7 @@ function tourLaufGps(lat, lng){
     zeichneTourNavi();
     tourStartBeiHalt(t, s); // Neu in 2.3
     if (s.kinder && s.kinder.length) anwesenheitAbfragen(t, s); // Neu in 2.1
+    stopVorschlagen(t); // Neu in 2.6
   }
 }
 

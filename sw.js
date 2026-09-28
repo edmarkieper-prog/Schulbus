@@ -1,6 +1,6 @@
 /* Service Worker: macht die App-Oberfläche offline nutzbar (Kartenkacheln brauchen weiterhin Internet).
    Strategie: erst Netzwerk (damit Updates sofort ankommen), bei Offline-Betrieb aus dem Cache. */
-const CACHE = "schulbus-fahrer-v15"; // Version 2.5: Original-Formular auch als Excel
+const CACHE = "schulbus-fahrer-v16"; // Version 2.6: Stop-Vorschlag am Tourende
 const DATEIEN = [
   "./",
   "./index.html",
