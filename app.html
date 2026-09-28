@@ -184,6 +184,8 @@
     #druckBereich tr.fehlt td{font-weight:800;}
     #druckBereich .summen{margin-top:10px; font-weight:700;}
     #druckBereich .unterschrift{margin-top:48px; border-top:1px solid #000; width:280px; padding-top:4px; font-size:12px;}
+    #druckBereich .foKopf{display:grid; grid-template-columns:1.2fr 1fr 1fr; gap:3px 18px; margin-bottom:8px; font-size:13px;}
+    #druckBereich .blatt2{page-break-before:always; padding-top:10px;}
   }
 </style>
 </head>
@@ -317,6 +319,7 @@
         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
           <button class="btn klein" id="kmBlattSpeichernBtn">💾 Blatt „Kilometer" speichern</button>
           <button class="btn hell klein" id="kmBlattDruckBtn">🖨️ Drucken</button>
+          <button class="btn klein" id="kmFormularBtn">📋 Original-Formular drucken</button>
           <button class="btn rot klein" id="kmBlattLoeschenBtn">🗑 Alles löschen</button>
         </div>
         <p style="font-size:12px; color:var(--text2); margin-top:8px;">
@@ -356,6 +359,18 @@
         <button class="btn hell klein" id="notifBtn">🔔 Meldungen erlauben</button>
       </div>
       <div class="card">
+        <h2>📋 Formular-Angaben (Original-Fahrtenbuch)</h2>
+        <p style="font-size:14px; color:var(--text2); margin-bottom:10px;">
+          Diese Angaben stehen im Kopf des Original-Formulars, das du im Fahrtenbuch drucken kannst.
+        </p>
+        <div class="feld"><label>Fahrer (Name, Vorname)</label><input id="foName" placeholder="z. B. Kieper, Edmar"></div>
+        <div class="feld"><label>Wohnort</label><input id="foWohnort" placeholder="z. B. Leutkirch"></div>
+        <div class="feld"><label>Einrichtung</label><input id="foEinrichtung"></div>
+        <div class="feld"><label>Kennzeichen</label><input id="foKennzeichen" placeholder="z. B. RV-XX 123"></div>
+        <div class="feld"><label>Tour-Nr.</label><input id="foTourNr"></div>
+        <button class="btn gelb klein" id="foSpeichernBtn">💾 Speichern</button>
+      </div>
+      <div class="card">
         <h2>Konto</h2>
         <div id="profilInfo" style="margin-bottom:10px;"></div>
         <button class="btn hell klein" id="pwAendernBtn">🔑 Passwort ändern</button>
@@ -378,8 +393,11 @@
       <div class="card">
         <h2>Info</h2>
         <p style="font-size:14px; color:var(--text2);">
-          <b>Version 2.3</b><br><br>
-          Neu in 2.3:<br>
+          <b>Version 2.4</b><br><br>
+          Neu in 2.4:<br>
+          • 📋 „Original-Formular drucken": das Fahrtenbuch-Formular deines Arbeitgebers (Tag 1–31, vormittags/nachmittags, Gesamt-km) wird automatisch mit deinen Kilometern ausgefüllt – Monat wählen, drucken, unterschreiben, abgeben<br>
+          • Die Kopf-Angaben dafür (Name, Wohnort, Einrichtung, Kennzeichen, Tour-Nr.) trägst du einmalig unter Mehr → Formular-Angaben ein<br><br>
+          Aus Version 2.3:<br>
           • 🚏 „Tour ab Halt 1": zusätzlich zur Gesamtfahrt zählen Tour-Kilometer und Tour-Fahrzeit automatisch ab dem ersten Haltepunkt deiner Tour (morgens, mittags, nachmittags) – live auf der Fahrt-Seite, im Fahrtenbuch, im Kilometer-Blatt, im Excel und im Ausdruck<br><br>
           Aus Version 2.2:<br>
           • 🖨️ Kilometer-Blatt und Anwesenheit direkt vom Handy drucken oder als PDF speichern – mit Unterschriften-Zeile für die Abgabe<br>
@@ -447,6 +465,7 @@ let zonen   = store.get("sf_zonen", []);
 let aktiveFahrt = store.get("sf_aktiv", null);
 let kmBlatt = store.get("sf_kmblatt", []); // Neu in 1.2: Kilometer-Blatt für die Köhler App
 let anwesenheit = store.get("sf_anwesenheit", []); // Neu in 2.1: Anwesenheit der Kinder
+let formular = store.get("sf_formular", {}); // Neu in 2.4: Kopf-Angaben für das Original-Fahrtenbuch
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -500,7 +519,7 @@ const auth = firebase.auth();
 const db = firebase.firestore();
 auth.languageCode = "de";
 
-const CLOUD_KEYS = ["sf_profil", "sf_touren", "sf_zonen", "sf_kmblatt", "sf_anrufe", "sf_anwesenheit"]; // je ein Cloud-Dokument
+const CLOUD_KEYS = ["sf_profil", "sf_touren", "sf_zonen", "sf_kmblatt", "sf_anrufe", "sf_anwesenheit", "sf_formular"]; // je ein Cloud-Dokument
 let cloudBereit = false, cloudBasis = null;
 let stempel = store.get("sf_stempel", {});          // wann jeder Schlüssel zuletzt HIER geändert wurde
 let cloudTripStand = {};                            // Fahrt-Id → JSON, wie sie zuletzt in der Cloud stand
@@ -543,12 +562,13 @@ function uebernehmen(k, wert, t){
   if (k === "sf_kmblatt") kmBlatt = wert;
   if (k === "sf_anrufe") anrufe = wert;
   if (k === "sf_anwesenheit") anwesenheit = wert;
+  if (k === "sf_formular") formular = wert;
 }
 function neuZeichnen(){
   try{
     fuelleTourWahl(); zeichneTouren(); zeichneStops(); zeichneZonenListe(); zeichneZonen();
     zeichneFahrtenbuch(); zeichneKmBlatt(); zeichneAnrufe(); zeichneTourNavi(); statistikAnzeigen();
-    zeichneAnwesenheit();
+    zeichneAnwesenheit(); formularFelderFuellen();
   }catch(e){}
 }
 async function cloudStart(user){
@@ -1735,12 +1755,13 @@ $("kmBlattSpeichernBtn").addEventListener("click", async () => {
   banner("💾 Kilometer.xlsx heruntergeladen ✅");
 });
 /* ================= Drucken (Neu in 2.2) ================= */
-function drucken(titel, inhaltHtml){
+function drucken(titel, inhaltHtml, roh){
   const d = $("druckBereich");
   d.innerHTML =
-    "<h1><img src='logo.svg' alt='' style='float:right; width:40px; height:40px;'>" + esc(titel) + "</h1>" +
-    "<div class='unter'>Fahrer: " + esc((auth.currentUser && auth.currentUser.email) || "") +
-    " · erstellt am " + new Date().toLocaleDateString("de-DE") + ", " + fmtZeit(Date.now()) + " Uhr</div>" +
+    (roh ? "" :
+      "<h1><img src='logo.svg' alt='' style='float:right; width:40px; height:40px;'>" + esc(titel) + "</h1>" +
+      "<div class='unter'>Fahrer: " + esc((auth.currentUser && auth.currentUser.email) || "") +
+      " · erstellt am " + new Date().toLocaleDateString("de-DE") + ", " + fmtZeit(Date.now()) + " Uhr</div>") +
     inhaltHtml +
     "<div class='unterschrift'>Datum, Unterschrift Fahrer</div>";
   const alterTitel = document.title;
@@ -1771,6 +1792,93 @@ $("kmBlattDruckBtn").addEventListener("click", () => {
   ).join("<br>") + "</div>";
   drucken("Kilometer-Blatt", html);
 });
+/* ================= Original-Fahrtenbuch-Formular (Neu in 2.4) =================
+   Druckt den Monat im Aufbau des Arbeitgeber-Formulars: Tag 1-31 mit
+   vormittags/nachmittags, Kilometerleistung, Grund-Spalte und Gesamt-km.
+   Vormittagstour → vormittags; Mittags- und Nachmittagstour → nachmittags (Gesamt-km der Fahrt). */
+function formularFelderFuellen(){
+  $("foName").value = formular.name || "";
+  $("foWohnort").value = formular.wohnort || "";
+  $("foEinrichtung").value = formular.einrichtung || "";
+  $("foKennzeichen").value = formular.kennzeichen || "";
+  $("foTourNr").value = formular.tourNr || "";
+}
+$("foSpeichernBtn").addEventListener("click", () => {
+  formular = {
+    name: $("foName").value.trim(), wohnort: $("foWohnort").value.trim(),
+    einrichtung: $("foEinrichtung").value.trim(), kennzeichen: $("foKennzeichen").value.trim(),
+    tourNr: $("foTourNr").value.trim()
+  };
+  store.set("sf_formular", formular);
+  banner("Formular-Angaben gespeichert ✅");
+});
+$("kmFormularBtn").addEventListener("click", () => {
+  if (kmBlatt.length === 0){ banner("Noch keine Einträge im Kilometer-Blatt."); return; }
+  if (!formular.name){ banner("Bitte zuerst unter Mehr → Formular-Angaben deinen Namen usw. eintragen."); zeige("mehr"); return; }
+  const monate = {};
+  kmBlatt.forEach(e => { const d = new Date(e.t); monate[d.getFullYear() + "-" + d.getMonth()] = true; });
+  const liste = Object.keys(monate).sort((a, b) => {
+    const [aj, am] = a.split("-").map(Number), [bj, bm] = b.split("-").map(Number);
+    return (bj * 12 + bm) - (aj * 12 + am);
+  });
+  modal(
+    "<h3>📋 Original-Formular drucken</h3>" +
+    "<p style='color:var(--text2); font-size:14px; margin-bottom:10px;'>Für welchen Monat?</p>" +
+    liste.map(k => {
+      const [j, m] = k.split("-").map(Number);
+      return "<button class='btn voll hell foMonat' data-k='" + k + "' style='margin-bottom:8px;'>" +
+        new Date(j, m, 1).toLocaleDateString("de-DE", { month: "long", year: "numeric" }) + "</button>";
+    }).join("") +
+    "<div class='knoepfe'><button class='btn hell' id='foAbbruch'>Abbrechen</button></div>"
+  );
+  $("foAbbruch").onclick = modalZu;
+  document.querySelectorAll(".foMonat").forEach(b => b.onclick = () => {
+    const [j, m] = b.dataset.k.split("-").map(Number);
+    modalZu();
+    formularDrucken(j, m);
+  });
+});
+function formularDrucken(jahr, monat){
+  const tage = {};
+  kmBlatt.forEach(e => {
+    const d = new Date(e.t);
+    if (d.getFullYear() !== jahr || d.getMonth() !== monat) return;
+    const tag = d.getDate();
+    tage[tag] = tage[tag] || { vm: 0, nm: 0 };
+    if (e.zeitraum === "Vormittag") tage[tag].vm += e.km;
+    else tage[tag].nm += e.km; // Mittag + Nachmittag zählen zu "nachmittags"
+  });
+  const monatText = new Date(jahr, monat, 1).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+  const kopf = seite =>
+    "<div class='foKopf'>" +
+    "<div style='font-size:16px;'><b>Fahrtenbuch</b> &nbsp;Seite " + seite + "</div>" +
+    "<div>Fahrer: <b>" + esc(formular.name || "") + "</b></div>" +
+    "<div>Wohnort: " + esc(formular.wohnort || "") + "</div>" +
+    "<div>für Monat: <b>" + monatText + "</b></div>" +
+    "<div>Tour-Nr.: " + esc(formular.tourNr || "") + "</div>" +
+    "<div>Kennzeichen: " + esc(formular.kennzeichen || "") + "</div>" +
+    "<div>Einrichtung: " + esc(formular.einrichtung || "") + "</div>" +
+    "</div>";
+  const w = x => x > 0 ? x.toFixed(1).replace(".", ",") : "";
+  const zeilen = (von, bis) => {
+    let h = "<table><tr><th style='width:32px;'>Tag</th><th style='width:88px;'></th><th style='width:110px;'>Kilometerleistung</th><th>Grund für Änderung der Kilometerleistung</th></tr>";
+    for (let t = von; t <= bis; t++){
+      const e = tage[t] || { vm: 0, nm: 0 };
+      h += "<tr><td rowspan='2' style='text-align:center; font-weight:700;'>" + t + "</td><td>vormittags</td><td>" + w(e.vm) + "</td><td></td></tr>";
+      h += "<tr><td>nachmittags</td><td>" + w(e.nm) + "</td><td></td></tr>";
+    }
+    return h;
+  };
+  let gesamt = 0;
+  Object.keys(tage).forEach(t => { gesamt += tage[t].vm + tage[t].nm; });
+  const html =
+    kopf(1) + zeilen(1, 19) + "</table>" +
+    "<div class='blatt2'>" + kopf(2) + zeilen(20, 31) +
+    "<tr><td colspan='2' style='font-weight:800;'>Gesamt-km</td><td style='font-weight:800;'>" +
+    gesamt.toFixed(1).replace(".", ",") + "</td><td></td></tr></table></div>";
+  drucken("Fahrtenbuch-" + monatText.replace(" ", "-"), html, true);
+}
+
 $("anwDruckBtn").addEventListener("click", () => {
   if (!anwesenheit.length){ banner("Noch keine Anwesenheits-Einträge."); return; }
   modal(
@@ -1866,7 +1974,7 @@ function appStart(){
   karteInit();
   fuelleTourWahl();
   zeichneTouren(); zeichneZonenListe(); zeichneFahrtenbuch(); zeichneKmBlatt();
-  zeichneTourNavi(); zeichneAnrufe(); zeichneAnwesenheit();
+  zeichneTourNavi(); zeichneAnrufe(); zeichneAnwesenheit(); formularFelderFuellen();
   if (telLaufend){ telAnzeigeStart(); } // laufenden Anruf nach Neustart weiterzählen
   uhrTick(); uhrTimer = setInterval(uhrTick, 1000);
   if (aktiveFahrt){ // App wurde während einer Fahrt neu geladen → weiter aufzeichnen

@@ -1,6 +1,6 @@
 /* Service Worker: macht die App-Oberfläche offline nutzbar (Kartenkacheln brauchen weiterhin Internet).
    Strategie: erst Netzwerk (damit Updates sofort ankommen), bei Offline-Betrieb aus dem Cache. */
-const CACHE = "schulbus-fahrer-v13"; // Version 2.3: Tour-km und Tour-Fahrzeit ab Halt 1
+const CACHE = "schulbus-fahrer-v14"; // Version 2.4: Original-Fahrtenbuch-Formular
 const DATEIEN = [
   "./",
   "./index.html",
