@@ -235,6 +235,14 @@
         <div class="stat"><div class="w" id="stKm">–</div><div class="l">km</div></div>
         <div class="stat"><div class="w" id="stTempo">–</div><div class="l">km/h</div></div>
       </div>
+      <div class="card hidden" id="tourStatsCard" style="margin-top:14px; border:2px solid var(--gelb); background:#fffdf2;">
+        <h2>🚏 Tour ab Halt 1</h2>
+        <div class="statGrid" style="grid-template-columns:1fr 1fr; margin-top:0;">
+          <div class="stat"><div class="w" id="stTourKm">–</div><div class="l">Tour-km</div></div>
+          <div class="stat"><div class="w" id="stTourZeit">–</div><div class="l">Tour-Fahrzeit</div></div>
+        </div>
+        <p id="tourStatsInfo" style="font-size:12px; color:var(--text2); margin-top:8px; text-align:center;"></p>
+      </div>
       <div class="card" style="margin-top:14px;">
         <h2>Heute &amp; dieser Monat</h2>
         <div class="statGrid" style="grid-template-columns:1fr 1fr; margin-top:0;">
@@ -370,8 +378,10 @@
       <div class="card">
         <h2>Info</h2>
         <p style="font-size:14px; color:var(--text2);">
-          <b>Version 2.2</b><br><br>
-          Neu in 2.2:<br>
+          <b>Version 2.3</b><br><br>
+          Neu in 2.3:<br>
+          • 🚏 „Tour ab Halt 1": zusätzlich zur Gesamtfahrt zählen Tour-Kilometer und Tour-Fahrzeit automatisch ab dem ersten Haltepunkt deiner Tour (morgens, mittags, nachmittags) – live auf der Fahrt-Seite, im Fahrtenbuch, im Kilometer-Blatt, im Excel und im Ausdruck<br><br>
+          Aus Version 2.2:<br>
           • 🖨️ Kilometer-Blatt und Anwesenheit direkt vom Handy drucken oder als PDF speichern – mit Unterschriften-Zeile für die Abgabe<br>
           • 🔒 Datenschutz: Touren stecken nicht mehr im Programmcode, sondern kommen nur noch aus deinem eigenen Cloud-Konto<br><br>
           Aus Version 2.1:<br>
@@ -806,6 +816,7 @@ function uhrTick(){
   $("uhr").textContent = jetzt.toLocaleTimeString("de-DE", {hour:"2-digit", minute:"2-digit", second:"2-digit"});
   $("datum").textContent = fmtDatum(jetzt);
   if (aktiveFahrt) $("stDauer").textContent = fmtDauer(Date.now() - aktiveFahrt.start);
+  if (aktiveFahrt && aktiveFahrt.tourStart) $("stTourZeit").textContent = fmtDauer(Date.now() - aktiveFahrt.tourStart.t);
   if (jetzt.getSeconds() % 5 === 0 || aktiveFahrt) statistikAnzeigen();
 }
 
@@ -826,7 +837,8 @@ function fahrtStarten(){
   aktiveFahrt = {
     id: uid(), start: Date.now(), tourId: tour ? tour.id : "", tourName: tour ? tour.name : "",
     punkte: [], km: 0, ereignisse: [],
-    protokoll: [], kmMonatStart: summe(tripsImZeitraum(monatsAnfang())).km
+    protokoll: [], kmMonatStart: summe(tripsImZeitraum(monatsAnfang())).km,
+    tourStart: null // Neu in 2.3: wird bei Ankunft am ersten Halt gesetzt (Tour-km und Tour-Zeit)
   };
   zeichneProtokoll([]);
   zonenStatus = {}; zonen.forEach(z => zonenStatus[z.id] = false);
@@ -842,6 +854,11 @@ function fahrtBeenden(){
   gpsStoppen();
   aktiveFahrt.ende = Date.now();
   aktiveFahrt.km = Math.round(aktiveFahrt.km * 100) / 100;
+  if (aktiveFahrt.tourStart){ // Neu in 2.3: Tour-Werte ab Halt 1 festhalten
+    aktiveFahrt.tourKm = Math.max(0, Math.round((aktiveFahrt.km - aktiveFahrt.tourStart.km) * 10) / 10);
+    aktiveFahrt.tourZeit = aktiveFahrt.ende - aktiveFahrt.tourStart.t;
+    aktiveFahrt.tourStartZeit = aktiveFahrt.tourStart.t;
+  }
   trips.unshift(aktiveFahrt);
   store.set("sf_trips", trips);
   const f = aktiveFahrt;
@@ -884,6 +901,41 @@ function gpsPunkt(pos){
   $("stTempo").textContent = speed != null ? Math.round(speed * 3.6) : "–";
   zonenPruefen(lat, lng);
   tourLaufGps(lat, lng); // Neu in 1.4: Ankunft am nächsten Halt erkennen
+  tourStartPruefen(lat, lng); // Neu in 2.3: Ankunft am ERSTEN Halt startet Tour-km und Tour-Zeit
+  tourStatsAnzeigen();
+}
+
+/* ================= Tour ab Halt 1 (Neu in 2.3) =================
+   Zusätzlich zur Gesamtfahrt (ab "Fahrt starten", z. B. am Depot) zählen
+   Tour-km und Tour-Fahrzeit erst ab dem ersten Haltepunkt der gewählten Tour. */
+function tourStartSetzen(){
+  aktiveFahrt.tourStart = { t: Date.now(), km: aktiveFahrt.km };
+  store.set("sf_aktiv", aktiveFahrt);
+  melden("🚏 Halt 1 (" + fmtZeit(Date.now()) + "): Tour-Kilometer und Tour-Zeit laufen jetzt mit.");
+  tourStatsAnzeigen();
+}
+function tourStartPruefen(lat, lng){
+  if (!aktiveFahrt || aktiveFahrt.tourStart || !aktiveFahrt.tourId) return;
+  const t = touren.find(x => x.id === aktiveFahrt.tourId);
+  if (!t || !t.stops.length) return;
+  if (haversine([lat, lng], [t.stops[0].lat, t.stops[0].lng]) < 60) tourStartSetzen();
+}
+function tourStartBeiHalt(t, s){ // falls GPS ungenau ist: Abhaken von Halt 1 startet die Messung auch
+  if (!aktiveFahrt || aktiveFahrt.tourStart || aktiveFahrt.tourId !== t.id) return;
+  if (t.stops.length && t.stops[0].id === s.id) tourStartSetzen();
+}
+function tourStatsAnzeigen(){
+  const karte = $("tourStatsCard");
+  if (!aktiveFahrt || !aktiveFahrt.tourId){ karte.classList.add("hidden"); return; }
+  karte.classList.remove("hidden");
+  if (!aktiveFahrt.tourStart){
+    $("stTourKm").textContent = "–"; $("stTourZeit").textContent = "–";
+    $("tourStatsInfo").textContent = "Startet automatisch, sobald du Halt 1 erreichst (oder Halt 1 abgehakt wird).";
+    return;
+  }
+  $("stTourKm").textContent = Math.max(0, aktiveFahrt.km - aktiveFahrt.tourStart.km).toFixed(1).replace(".", ",");
+  $("stTourZeit").textContent = fmtDauer(Date.now() - aktiveFahrt.tourStart.t);
+  $("tourStatsInfo").textContent = "Läuft seit " + fmtZeit(aktiveFahrt.tourStart.t) + " Uhr (Ankunft Halt 1).";
 }
 
 /* Alle 60 Sekunden einen Standort mit Uhrzeit und km-Stand festhalten */
@@ -931,6 +983,7 @@ function fahrtUiAktualisieren(){
     ? "Fahrt läuft seit " + fmtZeit(aktiveFahrt.start) + (aktiveFahrt.tourName ? " · Tour: " + aktiveFahrt.tourName : "")
     : "";
   if (!laeuft){ $("stDauer").textContent = "–"; $("stKm").textContent = "–"; $("stTempo").textContent = "–"; }
+  tourStatsAnzeigen();
   zeichneLiveEreignisse();
 }
 function zeichneLiveEreignisse(){
@@ -1080,6 +1133,7 @@ function zeichneTouren(){
       z.querySelector("input").onchange = ev => {
         s.done = ev.target.checked;
         speichereTouren();
+        if (s.done) tourStartBeiHalt(t, s); // Neu in 2.3
         if (s.done && s.kinder && s.kinder.length) anwesenheitAbfragen(t, s);
       };
       z.querySelector("[data-b='hoch']").onclick = () => {
@@ -1345,6 +1399,10 @@ function zeichneFahrtenbuch(){
       " · " + (t.km || 0).toFixed(1) + " km" + (t.tourName ? " · " + t.tourName : "") + "</div></div>" +
       "<span class='pfeil'>▸</span></div>" +
       "<div class='detail hidden'>" +
+      (t.tourKm != null
+        ? "<div class='ereignis'><b>🚏 Tour ab Halt 1:</b> " + t.tourKm.toFixed(1).replace(".", ",") + " km · " +
+          fmtDauer(t.tourZeit || 0) + " (ab " + fmtZeit(t.tourStartZeit) + " Uhr)</div>"
+        : "") +
       (t.ereignisse && t.ereignisse.length
         ? t.ereignisse.map(e => "<div class='ereignis'><b>" + fmtZeit(e.t) + "</b> – " + e.typ + " " + e.zone + "</div>").join("")
         : "<div class='ereignis'>Keine Zonen-Ereignisse.</div>") +
@@ -1432,6 +1490,7 @@ function tourNaviErledigt(){
     tourNaviBeenden(true);
   }
   zeichneTourNavi();
+  if (s) tourStartBeiHalt(t, s); // Neu in 2.3
   if (s && s.kinder && s.kinder.length) anwesenheitAbfragen(t, s); // Neu in 2.1
 }
 function tourNaviBeenden(leise){
@@ -1474,6 +1533,7 @@ function tourLaufGps(lat, lng){
     if (n) melden("🚏 Halt erreicht: " + s.name + " ✅ Nächster: " + n.name);
     else { melden("🎉 Tour „" + t.name + "“ beendet – alle Halte erledigt!"); tourNaviBeenden(true); }
     zeichneTourNavi();
+    tourStartBeiHalt(t, s); // Neu in 2.3
     if (s.kinder && s.kinder.length) anwesenheitAbfragen(t, s); // Neu in 2.1
   }
 }
@@ -1567,7 +1627,9 @@ function kilometerEintragen(f){
     t: f.start,
     zeitraum: zeitraumVon(f.start),
     tour: f.tourName || "",
-    km: Math.round((f.km || 0) * 10) / 10
+    km: Math.round((f.km || 0) * 10) / 10,
+    tourKm: f.tourKm != null ? f.tourKm : null,      // Neu in 2.3: km ab Halt 1
+    tourZeit: f.tourZeit != null ? f.tourZeit : null  // Neu in 2.3: Fahrzeit ab Halt 1
   });
   store.set("sf_kmblatt", kmBlatt);
   zeichneKmBlatt();
@@ -1586,22 +1648,30 @@ function zeichneKmBlatt(){
     html += "<div style='font-weight:700; margin-top:8px;'>" + m + " · gesamt " + summe.toFixed(1).replace(".", ",") + " km</div>";
     liste.slice().reverse().forEach(e => {
       html += "<div class='ereignis'><b>" + new Date(e.t).toLocaleDateString("de-DE", {weekday:"short", day:"2-digit", month:"2-digit"}) +
-        "</b> · " + e.zeitraum + (e.tour ? " · " + e.tour : "") + " · <b>" + e.km.toFixed(1).replace(".", ",") + " km</b></div>";
+        "</b> · " + e.zeitraum + (e.tour ? " · " + e.tour : "") + " · <b>" + e.km.toFixed(1).replace(".", ",") + " km</b>" +
+        (e.tourKm != null ? " · 🚏 Tour: " + e.tourKm.toFixed(1).replace(".", ",") + " km, " + fmtDauer(e.tourZeit || 0) : "") +
+        "</div>";
     });
   });
   ziel.innerHTML = html;
 }
 function kmBlattExcel(){ // Neu in 2.1: echte Excel-Datei statt CSV
-  const zeilen = [["Datum", "Zeitraum", "Tour", "Kilometer"]];
+  const zeilen = [["Datum", "Zeitraum", "Tour", "Kilometer", "Tour-km (ab Halt 1)", "Tour-Fahrzeit"]];
   kmBlatt.forEach(e => zeilen.push([
-    new Date(e.t).toLocaleDateString("de-DE"), e.zeitraum, e.tour, Math.round(e.km * 10) / 10
+    new Date(e.t).toLocaleDateString("de-DE"), e.zeitraum, e.tour, Math.round(e.km * 10) / 10,
+    e.tourKm != null ? e.tourKm : "", e.tourZeit != null ? fmtDauer(e.tourZeit) : ""
   ]));
   zeilen.push([]);
-  const gruppen = {};
-  kmBlatt.forEach(e => { const m = monatsName(e.t); gruppen[m] = (gruppen[m] || 0) + e.km; });
-  Object.keys(gruppen).forEach(m => zeilen.push(["Summe " + m, "", "", Math.round(gruppen[m] * 10) / 10]));
+  const gruppen = {}, gruppenTour = {};
+  kmBlatt.forEach(e => {
+    const m = monatsName(e.t);
+    gruppen[m] = (gruppen[m] || 0) + e.km;
+    if (e.tourKm != null) gruppenTour[m] = (gruppenTour[m] || 0) + e.tourKm;
+  });
+  Object.keys(gruppen).forEach(m => zeilen.push(["Summe " + m, "", "", Math.round(gruppen[m] * 10) / 10,
+    gruppenTour[m] != null ? Math.round(gruppenTour[m] * 10) / 10 : "", ""]));
   const ws = XLSX.utils.aoa_to_sheet(zeilen);
-  ws["!cols"] = [{ wch: 12 }, { wch: 12 }, { wch: 30 }, { wch: 10 }];
+  ws["!cols"] = [{ wch: 12 }, { wch: 12 }, { wch: 30 }, { wch: 10 }, { wch: 16 }, { wch: 13 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Kilometer");
   return wb;
@@ -1681,16 +1751,24 @@ function drucken(titel, inhaltHtml){
 $("kmBlattDruckBtn").addEventListener("click", () => {
   if (kmBlatt.length === 0){ banner("Noch keine Einträge im Kilometer-Blatt."); return; }
   const sortiert = [...kmBlatt].sort((a, b) => a.t - b.t);
-  let html = "<table><tr><th>Datum</th><th>Zeitraum</th><th>Tour</th><th>Kilometer</th></tr>";
+  let html = "<table><tr><th>Datum</th><th>Zeitraum</th><th>Tour</th><th>Kilometer</th><th>Tour-km (ab Halt 1)</th><th>Tour-Fahrzeit</th></tr>";
   sortiert.forEach(e => {
     html += "<tr><td>" + new Date(e.t).toLocaleDateString("de-DE") + "</td><td>" + esc(e.zeitraum) +
-      "</td><td>" + esc(e.tour) + "</td><td>" + e.km.toFixed(1).replace(".", ",") + "</td></tr>";
+      "</td><td>" + esc(e.tour) + "</td><td>" + e.km.toFixed(1).replace(".", ",") + "</td><td>" +
+      (e.tourKm != null ? e.tourKm.toFixed(1).replace(".", ",") : "–") + "</td><td>" +
+      (e.tourZeit != null ? fmtDauer(e.tourZeit) : "–") + "</td></tr>";
   });
   html += "</table>";
-  const gruppen = {};
-  kmBlatt.forEach(e => { const m = monatsName(e.t); gruppen[m] = (gruppen[m] || 0) + e.km; });
+  const gruppen = {}, gruppenTour = {};
+  kmBlatt.forEach(e => {
+    const m = monatsName(e.t);
+    gruppen[m] = (gruppen[m] || 0) + e.km;
+    if (e.tourKm != null) gruppenTour[m] = (gruppenTour[m] || 0) + e.tourKm;
+  });
   html += "<div class='summen'>" + Object.keys(gruppen).map(m =>
-    "Summe " + m + ": " + gruppen[m].toFixed(1).replace(".", ",") + " km").join("<br>") + "</div>";
+    "Summe " + m + ": " + gruppen[m].toFixed(1).replace(".", ",") + " km" +
+    (gruppenTour[m] != null ? " (davon Tour ab Halt 1: " + gruppenTour[m].toFixed(1).replace(".", ",") + " km)" : "")
+  ).join("<br>") + "</div>";
   drucken("Kilometer-Blatt", html);
 });
 $("anwDruckBtn").addEventListener("click", () => {
